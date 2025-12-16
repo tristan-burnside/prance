@@ -1,9 +1,13 @@
-import LLVM
+import SwiftyLLVM
 
 final class DoubleStore: StoredType {
+  
   var IRType: IRType? {
     get {
-      return FloatType.double
+      guard var module else {
+        fatalError("Doubles must be in a module to be emitted")
+      }
+      return FloatingPointType.double(in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -11,7 +15,10 @@ final class DoubleStore: StoredType {
   }
   var IRRef: IRType? {
     get {
-      return FloatType.double
+      guard var module else {
+        fatalError("Doubles must be in a module to be emitted")
+      }
+      return FloatingPointType.double(in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -19,20 +26,17 @@ final class DoubleStore: StoredType {
   }
   let name = "Double"
   
-  convenience init?(name: String) {
-    self.init()
-    guard name == self.name else {
-      return nil
-    }
-  }
-  
+  var module: Module?
 }
 
 final class IntStore: StoredType {
   let name = "Int"
   var IRType: IRType? {
     get {
-      return IntType(width: MemoryLayout<Int>.size * 8)
+      guard var module else {
+        fatalError("Ints must be in a module to be emitted")
+      }
+      return IntegerType(MemoryLayout<Int>.size * 8, in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -41,26 +45,27 @@ final class IntStore: StoredType {
   
   var IRRef: IRType? {
     get {
-      return IntType(width: MemoryLayout<Int>.size * 8)
+      guard var module else {
+        fatalError("Ints must be in a module to be emitted")
+      }
+      return IntegerType(MemoryLayout<Int>.size * 8, in: &module)
     }
     set {
       // Not implemented because this type is already known
     }
   }
 
-  convenience init?(name: String) {
-    self.init()
-    guard name == self.name else {
-      return nil
-    }
-  }
+  var module: Module?
 }
 
 final class FloatStore: StoredType {
   let name = "Float"
   var IRType: IRType? {
     get {
-      return FloatType.float
+      guard var module else {
+        fatalError("Floats must be in a module to be emitted")
+      }
+      return FloatingPointType.float(in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -69,26 +74,27 @@ final class FloatStore: StoredType {
   
   var IRRef: IRType? {
     get {
-      return FloatType.float
+      guard var module else {
+        fatalError("Floats must be in a module to be emitted")
+      }
+      return FloatingPointType.float(in: &module)
     }
     set {
       // Not implemented because this type is already known
     }
   }
   
-  convenience init?(name: String) {
-    self.init()
-    guard name == self.name else {
-      return nil
-    }
-  }
+  var module: Module?
 }
 
 final class StringStore: StoredType {
   let name = "String"
   var IRType: IRType? {
     get {
-      return PointerType(pointee: IntType.int8)
+      guard var module else {
+        fatalError("Strings must be in a module to be emitted")
+      }
+      return PointerType(pointee: module.i8, in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -97,26 +103,27 @@ final class StringStore: StoredType {
 
   var IRRef: IRType? {
     get {
-      return PointerType(pointee: IntType.int8)
+      guard var module else {
+        fatalError("Strings must be in a module to be emitted")
+      }
+      return PointerType(pointee: module.i8, in: &module)
     }
     set {
       // Not implemented because this type is already known
     }
   }
   
-  convenience init?(name: String) {
-    self.init()
-    guard name == self.name else {
-      return nil
-    }
-  }
+  var module: Module?
 }
 
 final class VoidStore: StoredType {
   let name = ""
   var IRType: IRType? {
     get {
-      return VoidType()
+      guard var module else {
+        fatalError("Voids must be in a module to be emitted")
+      }
+      return VoidType(in: &module)
     }
     set {
       // Not implemented because this type is already known
@@ -125,14 +132,17 @@ final class VoidStore: StoredType {
   
   var IRRef: IRType? {
     get {
-      return VoidType()
+      guard var module else {
+        fatalError("Voids must be in a module to be emitted")
+      }
+      return VoidType(in: &module)
     }
     set {
       // Not implemented because this type is already known
     }
   }
-
-  convenience init?(name: String) {
-      return nil
-  }
+  
+  var module: Module?
+  
+  init() {}
 }

@@ -1,5 +1,5 @@
 import Foundation
-import LLVM
+import SwiftyLLVM
 
 extension String: Error {}
 
@@ -69,10 +69,9 @@ public struct PranceCompiler {
       try FileManager.default.removeItem(at: objPath)
     }
     
-    let targetMachine = try TargetMachine()
-    try targetMachine.emitToFile(module: irGen.module,
-                                 type: .object,
-                                 path: objPath.path)
+    let targetMachine = try TargetMachine(for: Target.host())
+    try irGen.module.write(.objectFile, for: targetMachine, to: objPath.path())
+
     print("Successfully wrote binary object file to \(objPath.lastPathComponent)")
     
     let execPath = path.deletingPathExtension()

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LLVM
+import SwiftyLLVM
 
 indirect enum TypedExpr {
   case literal(LiteralType, StoredType)
@@ -50,6 +50,10 @@ indirect enum TypedExpr {
       return type
     }
   }
+  
+  var resolvedType: StoredType {
+    (type as? ReferenceStore)?.pointee ?? type
+  }
 }
 
 final class TypeResolver: ASTChecker {
@@ -68,7 +72,7 @@ final class TypeResolver: ASTChecker {
   func resolveTypes() throws {
     for type in file.customTypes {
       parameterValues.startFrame()
-      parameterValues.addVariable(name: "self", value: CustomStore(name: type.name)!)
+      parameterValues.addVariable(name: "self", value: CustomStore(name: type.name))
       for function in type.functions {
         parameterValues.startFrame()
         for arg in function.prototype.params {
@@ -128,7 +132,10 @@ final class TypeResolver: ASTChecker {
       return .literal(.string(value), StringStore())
     case .memberDereference(let instanceExpr, let reference):
       let instanceWithType = try resolveType(of: instanceExpr)
-      let instanceType = instanceWithType.type
+      var instanceType = instanceWithType.type
+      if let referenceType = instanceType as? ReferenceStore {
+        instanceType = referenceType.pointee
+      }
       guard let definition = allTypes[instanceType.name] else {
         throw ParseError.typeDoesNotContainMembers(instanceType.name)
       }
@@ -138,7 +145,7 @@ final class TypeResolver: ASTChecker {
           return name == propName
         }
         let type = property?.1 ?? VoidStore()
-        return .memberDereference(instanceWithType, reference, type)
+        return .memberDereference(instanceWithType, reference, ReferenceStore(pointee: type))
       case .function(let functionCall):
         let function = definition.prototypes.first { function -> Bool in
           return functionCall.name == function.name
@@ -163,22 +170,22 @@ final class TypeResolver: ASTChecker {
     case .binary(let lhs, let op, let rhs):
       let lhsTyped = try resolveType(of: lhs)
       let rhsTyped = try resolveType(of: rhs)
-      guard lhsTyped.type.name == rhsTyped.type.name else {
-        throw ParseError.invalidOperation(lhsTyped.type, rhsTyped.type, FilePosition(line: 0, position: 0))
+      guard lhsTyped.resolvedType.name == rhsTyped.resolvedType.name else {
+        throw ParseError.invalidOperation(lhsTyped.resolvedType, rhsTyped.resolvedType, FilePosition(line: 0, position: 0))
       }
       return .binary(lhsTyped, op, rhsTyped, lhsTyped.type)
     case .logical(let lhs, let op, let rhs):
       let lhsTyped = try resolveType(of: lhs)
       let rhsTyped = try resolveType(of: rhs)
-      guard lhsTyped.type.name == rhsTyped.type.name else {
-        throw ParseError.invalidComparison(lhsTyped.type, rhsTyped.type, FilePosition(line: 0, position: 0))
+      guard lhsTyped.resolvedType.name == rhsTyped.resolvedType.name else {
+        throw ParseError.invalidComparison(lhsTyped.resolvedType, rhsTyped.resolvedType, FilePosition(line: 0, position: 0))
       }
       return .logical(lhsTyped, op, rhsTyped, IntStore())
     case .variable(let name):
       let variableType = try parameterValues.findVariable(name: name)
       return .variable(name, variableType)
     case .variableDefinition(let definition):
-      parameterValues.addVariable(name: definition.name, value: definition.type)
+      parameterValues.addVariable(name: definition.name, value: ReferenceStore(pointee: definition.type))
       return .variableDefinition(definition, VoidStore())
     case .variableAssignment(let variable, let value):
       let variableTyped = try resolveType(of: variable)

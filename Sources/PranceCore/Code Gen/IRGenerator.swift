@@ -1,4 +1,4 @@
-import LLVM
+import SwiftyLLVM
 
 let kInternalPropertiesCount = 2
 
@@ -12,10 +12,10 @@ enum IRError: Error, CustomStringConvertible {
   case unableToCompare(IRType, IRType)
   case expectedParameterDefinition(String)
   case unknownMember(String)
-  case unknownMemberFunction(String)
+  case unknownMemberFunction(String, in: String)
   case unknownType(String)
   case incorrectlyParsedLiteral
-  case missingFunction(TypeDefinition, String)
+  case missingFunction(String, String)
   case returnOutsideFunction
   
   var description: String {
@@ -38,47 +38,46 @@ enum IRError: Error, CustomStringConvertible {
       return "expected parameter definition in declaration of function \(name)"
     case .unknownMember(let name):
       return "No member: \(name) in type"
-    case .unknownMemberFunction(let name):
-      return "No function: \(name) in type"
+    case .unknownMemberFunction(let name, let type):
+      return "No function: \(name) in type \(type)"
     case .unknownType(let name):
       return "No type defined called \(name)"
     case .incorrectlyParsedLiteral:
       return "String literal was not parsed before generating LLVM IR"
-    case .missingFunction(let type, let name):
-      return "Type: \(type.name) is missing protocol function \(name)"
+    case .missingFunction(let typeName, let name):
+      return "Type: \(typeName) is missing protocol function \(name)"
     case .returnOutsideFunction:
       return "Return statement executed outside of function body"
     }
   }
 }
 
-func ==(lhs: IRType, rhs: IRType) -> Bool {
-    return lhs.asLLVM() == rhs.asLLVM()
-}
+//func ==(lhs: IRType, rhs: IRType) -> Bool {
+//    return lhs.llvm == rhs.llvm
+//}
 
 class IRGenerator {
-  let module: Module
-  let builder: IRBuilder
+  var module: Module
+  var currentInsertion: InsertionPoint!
+  var currentFunction: Function!
   let file: File
   let protocolType: StructType
   
   private var parameterValues: StackMemory<IRValue>
   private var typesByIR: [(IRType, TypeDefinition)]
   private var typesByName: [String: CallableType]
-  private var typesByID: [UInt32: TypeDefinition]
-  private var nextTypeID: UInt32 = 0
+  private var typesByID: [Int32: TypeDefinition]
+  private var nextTypeID: Int32 = 0
   private var currentReturnBlock: BasicBlock?
   
   init(moduleName: String = "main", file: File) {
-    self.module = Module(name: moduleName)
-    let builder = IRBuilder(module: module)
-    self.builder = builder
+    self.module = Module(moduleName)
     self.file = file
     parameterValues = StackMemory()
     typesByName = [:]
     typesByIR = []
     typesByID = [:]
-    protocolType = IRGenerator.defineProtocolStruct(builder: builder)
+    protocolType = IRGenerator.defineProtocolStruct(module: &module)
   }
   
   func emit() throws {
@@ -109,14 +108,14 @@ class IRGenerator {
   
   func emitPrintf() {
     guard module.function(named: "printf") == nil else { return }
-    let printfType = FunctionType([PointerType(pointee: IntType.int8)], IntType.int32, variadic: true)
-    let _ = builder.addFunction("printf", type: printfType)
+    let printfType = FunctionType(from: [PointerType(in: &module)], to: IntegerType(32, in: &module), isVarArg: true, in: &module)
+    let _ = module.declareFunction("printf", printfType)
   }
   
   func emitScanf() {
     guard module.function(named: "scanf") == nil else { return }
-    let printfType = FunctionType([PointerType(pointee: IntType.int8)], IntType.int32, variadic: true)
-    let _ = builder.addFunction("scanf", type: printfType)
+    let printfType = FunctionType(from: [PointerType(in: &module)], to: IntegerType(32, in: &module), isVarArg: true, in: &module)
+    let _ = module.declareFunction("scanf", printfType)
   }
   
   func emitScanLine() throws {
@@ -133,148 +132,149 @@ class IRGenerator {
     parameterValues.startFrame()
     
     for (idx, arg) in prototype.params.enumerated() {
-      let param = function.parameter(at: idx)!
+      let param = function.parameters[idx]
       parameterValues.addStatic(name: arg.name, value: param)
     }
     
-    let entryBlock = function.appendBasicBlock(named: "entry")
-    builder.positionAtEnd(of: entryBlock)
+    let entryBlock = module.appendBlock(named: "entry", to: function)
+    let blockInsertionPoint = module.endOf(entryBlock)
     
     //Body
     
     // create temp
-    let section = builder.buildAlloca(type: ArrayType(elementType: IntType.int8, count: 20))
-    let format = builder.buildGlobalStringPtr("%19s%n")
-    let scannedChars = builder.buildAlloca(type: IntType.int32)
-    let resultChars = builder.buildAlloca(type: IntType.int32)
-    let resultSize = builder.buildAlloca(type: IntType.int32)
-    let resultPtr = builder.buildAlloca(type: PointerType(pointee: IntType.int8))
-    let initialResult = builder.buildMalloc(IntType.int8, count: UInt32(20))
-    builder.buildStore(UInt32(0), to: resultChars)
-    builder.buildStore(UInt32(20), to: resultSize)
-    builder.buildStore(initialResult, to: resultPtr)
+    let section = module.insertAlloca(ArrayType(20, IntegerType(8, in: &module), in: &module), at: blockInsertionPoint)
+    let format = module.insertGlobalStringPointer("%19s%n", name: "scanFormat", at: blockInsertionPoint)
+    let scannedChars = module.insertAlloca(module.i32, at: blockInsertionPoint)
+    let resultChars = module.insertAlloca(module.i32, at: blockInsertionPoint)
+    let resultSize = module.insertAlloca(module.i32, at: blockInsertionPoint)
+    let resultPtr = module.insertAlloca(PointerType(pointee: module.i8, in: &module), at: blockInsertionPoint)
+    let initialResult = module.insertMalloc(module.i8, count: module.i32.constant(20), at: blockInsertionPoint)
+    module.insertStore(module.i32.zero, to: resultChars, at: blockInsertionPoint)
+    module.insertStore(module.i32.constant(20), to: resultSize, at: blockInsertionPoint)
+    module.insertStore(initialResult, to: resultPtr, at: blockInsertionPoint)
     guard let scanf = file.prototypeMap["scanf"] else {
       throw IRError.unknownFunction("scanf")
     }
     let scanfFunction = try emitPrototype(scanf)
     
     // while more chars
-    let scanBlock = function.appendBasicBlock(named: "scan")
-    let addSpaceBlock = function.appendBasicBlock(named: "addSpace")
-    let saveBlock = function.appendBasicBlock(named: "save")
-    let endScanBlock = function.appendBasicBlock(named: "end_scan")
-    let returnBlock = function.appendBasicBlock(named: "return")
-    builder.buildBr(scanBlock)
-    builder.positionAtEnd(of: scanBlock)
+    let scanBlock = module.appendBlock(named: "scan", to: function)
+    let addSpaceBlock = module.appendBlock(named: "addSpace", to: function)
+    let saveBlock = module.appendBlock(named: "save", to: function)
+    let endScanBlock = module.appendBlock(named: "end_scan", to: function)
+    let returnBlock = module.appendBlock(named: "return", to: function)
+    module.insertBr(to: scanBlock, at: blockInsertionPoint)
+    let scanInsertion = module.endOf(scanBlock)
     // scanf
     let args: [IRValue] = [format, section, scannedChars]
-    let _ = builder.buildCall(scanfFunction, args: args)
-    let scannedCharsValue = builder.buildLoad(scannedChars, type: IntType.int32)
+    let _ = module.insertCall(scanfFunction, on: args, at: scanInsertion)
+    let scannedCharsValue = module.insertLoad(module.i32, from: scannedChars, at: scanInsertion)
     // save partial
-    let oldResultCharsVal = builder.buildLoad(resultChars, type: IntType.int32)
-    let newResultCharsVal = builder.buildAdd(oldResultCharsVal, scannedCharsValue)
-    builder.buildStore(newResultCharsVal, to: resultChars)
-    let resultSizeVal = builder.buildLoad(resultSize, type: IntType.int32)
-    let needSpace = builder.buildICmp(newResultCharsVal, resultSizeVal, .signedGreaterThan)
-    let currentCharPtr = builder.buildAlloca(type: IntType.int32)
-    builder.buildStore(UInt32(0), to: currentCharPtr)
-    builder.buildCondBr(condition: needSpace, then: addSpaceBlock, else: saveBlock)
+    let oldResultCharsVal = module.insertLoad(module.i32, from: resultChars, at: scanInsertion)
+    let newResultCharsVal = module.insertAdd(oldResultCharsVal, scannedCharsValue, at: scanInsertion)
+    module.insertStore(newResultCharsVal, to: resultChars, at: scanInsertion)
+    let resultSizeVal = module.insertLoad(module.i32, from: resultSize, at: scanInsertion)
+    let needSpace = module.insertIntegerComparison(.sgt, newResultCharsVal, resultSizeVal, at: scanInsertion)
+    let currentCharPtr = module.insertAlloca(module.i32, at: scanInsertion)
+    module.insertStore(module.i32.zero, to: currentCharPtr, at: scanInsertion)
+    module.insertCondBr(if: needSpace, then: addSpaceBlock, else: saveBlock, at: scanInsertion)
     
-    builder.positionAtEnd(of: addSpaceBlock)
-    let oldResult = builder.buildLoad(resultPtr, type: PointerType(pointee: IntType.int8))
-    let oldResultSize = builder.buildLoad(resultSize, type: IntType.int32)
-    let newResultSize = builder.buildMul(oldResultSize, UInt32(2), overflowBehavior: .noUnsignedWrap)
-    let newResult = builder.buildMalloc(IntType.int8, count: newResultSize)
-    let _ = builder.buildCall(copyFunc, args: [oldResult, newResult, oldResultSize])
-    builder.buildStore(newResultSize, to: resultSize)
-    builder.buildStore(newResult, to: resultPtr)
-    builder.buildFree(oldResult)
-    builder.buildBr(saveBlock)
+    let addSpaceInsertion = module.endOf(addSpaceBlock)
+    let oldResult = module.insertLoad(PointerType(pointee: module.i8, in: &module), from: resultPtr, at: addSpaceInsertion)
+    let oldResultSize = module.insertLoad(module.i32, from: resultSize, at: addSpaceInsertion)
+    let newResultSize = module.insertMul(overflow: .nuw, oldResultSize, module.i32.constant(2), at: addSpaceInsertion)
+    let newResult = module.insertMalloc(module.i8, count: newResultSize, at: addSpaceInsertion)
+    let _ = module.insertCall(copyFunc, on: [oldResult, newResult, oldResultSize], at: addSpaceInsertion)
+    module.insertStore(newResultSize, to: resultSize, at: addSpaceInsertion)
+    module.insertStore(newResult, to: resultPtr, at: addSpaceInsertion)
+    module.insertFree(oldResult, at: addSpaceInsertion)
+    module.insertBr(to: saveBlock, at: addSpaceInsertion)
     
-    builder.positionAtEnd(of: saveBlock)
-    let nextCharPtr = builder.buildLoad(resultPtr, type: PointerType(pointee: IntType.int8))
-    let nextChar = builder.buildGEP(nextCharPtr, type: IntType.int8, indices: [oldResultCharsVal])
-    let scannedCharPtr = builder.buildGEP(section, type: IntType.int8, indices: [UInt32(0)])
-    let _ = builder.buildCall(copyFunc, args: [scannedCharPtr, nextChar, scannedCharsValue])
-    builder.buildBr(endScanBlock)
+    let saveInsertion = module.endOf(saveBlock)
+    let nextCharPtr = module.insertLoad(PointerType(pointee: module.i8, in: &module), from: resultPtr, at: saveInsertion)
+    let nextChar = module.insertGetElementPointer(of: nextCharPtr, typed: module.i8, indices: [oldResultCharsVal], at: saveInsertion)
+    let scannedCharPtr = module.insertGetElementPointer(of: section, typed: module.i8, indices: [module.i32.zero], at: saveInsertion)
+    let _ = module.insertCall(copyFunc, on: [scannedCharPtr, nextChar, scannedCharsValue], at: saveInsertion)
+    module.insertBr(to: endScanBlock, at: saveInsertion)
     
     // end while
-    builder.positionAtEnd(of: endScanBlock)
-    let cont = builder.buildICmp(scannedCharsValue, UInt32(19), .equal)
-    builder.buildCondBr(condition: cont, then: scanBlock, else: returnBlock)
+    let endInsertion = module.endOf(endScanBlock)
+    let cont = module.insertIntegerComparison(.eq, scannedCharsValue, module.i32.constant(19), at: endInsertion)
+    module.insertCondBr(if: cont, then: scanBlock, else: returnBlock, at: endInsertion)
     // allocate mem for output
-    builder.positionAtEnd(of: returnBlock)
+    let returnInsertion = module.endOf(returnBlock)
     // return
-    let result = builder.buildLoad(resultPtr, type: (resultPtr.type as! PointerType).pointee)
-    let resultCharsCount = builder.buildAdd(newResultCharsVal, UInt32(1))
-    let retBuffer = builder.buildMalloc(IntType.int8, count: resultCharsCount)
+    let result = module.insertLoad(PointerType(pointee: module.i8, in: &module), from: resultPtr, at: returnInsertion)
+    let resultCharsCount = module.insertAdd(newResultCharsVal, module.i32.constant(1), at: returnInsertion)
+    let retBuffer = module.insertMalloc(module.i8, count: resultCharsCount, at: returnInsertion)
 
-    let _ = builder.buildCall(copyFunc, args: [result, retBuffer, resultCharsCount])
-    builder.buildFree(result)
-    builder.buildRet(retBuffer)
+    let _ = module.insertCall(copyFunc, on: [result, retBuffer, resultCharsCount], at: returnInsertion)
+    module.insertFree(result, at: returnInsertion)
+    module.insertReturn(retBuffer, at: returnInsertion)
     parameterValues.endFrame()
   }
   
   func emitCopyStr() throws {
-    let function = module.addFunction(".copyStr", type: FunctionType([PointerType(pointee: IntType.int8),
-                                                                      PointerType(pointee: IntType.int8),
-                                                                      IntType.int32], VoidType()))
-    let entry = function.appendBasicBlock(named: "entry")
-    let copy = function.appendBasicBlock(named: "copy")
-    let returnBlock = function.appendBasicBlock(named: "return")
-    builder.positionAtEnd(of: entry)
-    let currentChar = builder.buildAlloca(type: IntType.int32)
-    builder.buildStore(UInt32(0), to: currentChar)
-    guard let fromStr = function.parameter(at: 0),
-          let toStr = function.parameter(at: 1),
-          let charsToCopy = function.parameter(at: 2) else {
+    let function = module.declareFunction(".copyStr", FunctionType(from: [PointerType(pointee: module.i8, in: &module),
+                                                                          PointerType(pointee: module.i8, in: &module),
+                                                                          module.i32], to: module.void, isVarArg: false, in: &module))
+    let entry = module.appendBlock(named: "entry", to: function)
+    let copy = module.appendBlock(named: "copy", to: function)
+    let returnBlock = module.appendBlock(named: "return", to: function)
+    currentInsertion = module.endOf(entry)
+    let currentChar = module.insertAlloca(module.i32, at: currentInsertion)
+    module.insertStore(module.i32.zero, to: currentChar, at: currentInsertion)
+    guard function.parameters.count == 3  else {
       throw IRError.wrongNumberOfArgs("copyStr", expected: 3, got: 2)
     }
-    builder.buildBr(copy)
-    builder.positionAtEnd(of: copy)
-    let currentCharValue = builder.buildLoad(currentChar, type: IntType.int32)
-    let from = builder.buildGEP(fromStr, type: IntType.int8, indices: [currentCharValue])
-    let to = builder.buildGEP(toStr, type: IntType.int8, indices: [currentCharValue])
-    let fromValue = builder.buildLoad(from, type: IntType.int8)
-    builder.buildStore(fromValue, to: to)
-    let newChar = builder.buildAdd(currentCharValue, UInt32(1))
-    builder.buildStore(newChar, to: currentChar)
-    let cont = builder.buildICmp(charsToCopy, newChar, .equal)
-    builder.buildCondBr(condition: cont, then: returnBlock, else: copy)
-    builder.positionAtEnd(of: returnBlock)
-    builder.buildRetVoid()
+    let fromStr = function.parameters[0]
+    let toStr = function.parameters[1]
+    let charsToCopy = function.parameters[2]
+    module.insertBr(to: copy, at: currentInsertion)
+    currentInsertion = module.endOf(copy)
+    let currentCharValue = module.insertLoad(module.i32, from: currentChar, at: currentInsertion)
+    let from = module.insertGetElementPointer(of: fromStr, typed: module.i8, indices: [currentCharValue], at: currentInsertion)
+    let to = module.insertGetElementPointer(of: toStr, typed: module.i8, indices: [currentCharValue], at: currentInsertion)
+    let fromValue = module.insertLoad(module.i8, from: from, at: currentInsertion)
+    module.insertStore(fromValue, to: to, at: currentInsertion)
+    let newChar = module.insertAdd(currentCharValue, module.i32.constant(1), at: currentInsertion)
+    module.insertStore(newChar, to: currentChar, at: currentInsertion)
+    let cont = module.insertIntegerComparison(.eq, charsToCopy, newChar, at: currentInsertion)
+    module.insertCondBr(if: cont, then: returnBlock, else: copy, at: currentInsertion)
+    currentInsertion = module.endOf(returnBlock)
+    module.insertReturn(at: currentInsertion)
   }
   
   func debugPrint(value: IRValue) {
     let printValue: IRValue
-    if let type = value.type as? PointerType {
-      printValue = builder.buildLoad(value, type: type.pointee)
+    if let type = value.type as? PointerType, let pointee = type.pointee {
+      printValue = module.insertLoad(pointee, from: value, at: currentInsertion)
     } else {
       printValue = value
     }
     guard let printf = module.function(named: "printf") else { return }
-    let format = builder.buildGlobalStringPtr("%d\n")
-    _ = builder.buildCall(printf, args: [format, printValue])
+    let format = module.insertGlobalStringPointer("%d\n", name: "debugFormat", at: currentInsertion)
+    _ = module.insertCall(printf, on: [format, printValue], at: currentInsertion)
   }
   
   func defineType(_ type: TypeDefinition) {
-    let newType = builder.createStruct(name: type.name)
+    let newType = StructType(named: type.name, [], in: &module)
     type.IRType = newType
-    type.IRRef = PointerType(pointee: newType)
+    type.IRRef = PointerType(pointee: newType, in: &module)
     typesByIR.append((newType, type))
     typesByName[type.name] = type
   }
   
   func defineProtocol(_ proto: ProtocolDefinition) {
     proto.IRType = protocolType
-    proto.IRRef = PointerType(pointee: protocolType)
+    proto.IRRef = PointerType(in: &module)
     
     typesByName[proto.name] = proto
   }
   
-  static func defineProtocolStruct(builder: IRBuilder) -> StructType {
-    let properties = [IntType.int32, IntType.int32]
-    let llvmProtocol = builder.createStruct(name: "proto", types: properties)
+  static func defineProtocolStruct(module: inout Module) -> StructType {
+    let properties = [IntegerType(32, in: &module), IntegerType(32, in: &module)]
+    let llvmProtocol = StructType(named: "proto", properties, in: &module)//builder.createStruct(name: "proto", types: properties)
     return llvmProtocol
   }
   
@@ -282,9 +282,9 @@ class IRGenerator {
     guard let llvmType = type.IRType else {
       throw IRError.unknownType(type.name)
     }
-    let properties = try type.properties.map{ try $0.1.findRef(types: typesByName) }
-    let internalProperties = [IntType.int32, IntType.int32]
-    llvmType.setBody(internalProperties + properties)
+    let properties = try type.properties.map{ try $0.1.findRef(types: typesByName, in: module) }
+    let internalProperties = [module.i32, module.i32]
+    llvmType.setFields(internalProperties + properties)
     try emitInitializer(type.initMethod, for: type)
     for function in type.functions {
       try emitMember(function: function, of: type)
@@ -299,16 +299,16 @@ class IRGenerator {
     defer {
       parameterValues.endFrame()
     }
-    let mainType = FunctionType([], VoidType())
-    let function = builder.addFunction("main", type: mainType)
-    let entry = function.appendBasicBlock(named: "entry")
-    builder.positionAtEnd(of: entry)
-    
+    let mainType = FunctionType(from: [], to: module.void, isVarArg: false, in: &module)
+    let function = module.declareFunction("main", mainType)
+    let entry = module.appendBlock(named: "entry", to: function)
+    currentInsertion = module.endOf(entry)
+    currentFunction = function
     for expr in file.typedExpressions {
       let _ = try emitExpr(expr)
     }
     
-    builder.buildRetVoid()
+    module.insertReturn(at: currentInsertion)
   }
   
   @discardableResult
@@ -320,17 +320,17 @@ class IRGenerator {
   @discardableResult
   func emitMemberStub(prototype: Prototype, of type: CallableType, conforms: String) throws -> Function {
     guard let matchingType = typesByName[conforms] else {
-      throw IRError.unknownMemberFunction(prototype.name)
+      throw IRError.unknownMemberFunction(prototype.name, in: conforms)
     }
     let prototypeFunction = try emitMember(prototype: prototype, of: matchingType)
     
     let function = try emitMember(prototype: prototype, of: type)
-    let entry = function.appendBasicBlock(named: "entry")
-    builder.positionAtEnd(of: entry)
-    let protocolSelf = builder.buildBitCast(function.parameter(at: 0)!, type: PointerType(pointee: protocolType))
-    let protocolParameters = [protocolSelf] + function.parameters.dropFirst()
-    let ret = builder.buildCall(prototypeFunction, args: protocolParameters)
-    builder.buildRet(ret)
+    let entry = module.appendBlock(named: "entry", to: function)
+    currentInsertion = module.endOf(entry)
+    let protocolSelf = module.insertCast(.bitCast, function.parameters[0], to: PointerType(pointee: protocolType, in: &module), at: currentInsertion)
+    let protocolParameters = [protocolSelf] + (Array(function.parameters.dropFirst()) as! [IRValue])
+    let ret = module.insertCall(prototypeFunction, on: protocolParameters, at: currentInsertion)
+    module.insertReturn(ret, at: currentInsertion)
     return function
   }
   
@@ -346,7 +346,7 @@ class IRGenerator {
   func internalPrototype(for prototype: Prototype, of type: CallableType) throws -> Prototype {
     // Add self arg reference
     let internalName = type.name + "." + prototype.name
-    let selfType = CustomStore(name: type.name)!
+    let selfType = CustomStore(name: type.name)
     let internalParams = [VariableDefinition(name: "self", type: selfType)] + prototype.params
     return Prototype(name: internalName, params: internalParams, returnType: prototype.returnType)
   }
@@ -366,47 +366,53 @@ class IRGenerator {
     parameterValues.startFrame()
     
     for (idx, arg) in prototype.params.enumerated() {
-      let param = function.parameter(at: idx)!
+      let param = function.parameters[idx]
       parameterValues.addStatic(name: arg.name, value: param)
     }
     
-    let entryBlock = function.appendBasicBlock(named: "entry")
-    let returnBlock = function.appendBasicBlock(named: "return")
-    let defaultBlock = function.appendBasicBlock(named: "default")
+    let entryBlock = module.appendBlock(named: "entry", to: function)
+    let returnBlock = module.appendBlock(named: "return", to: function)
+    let defaultBlock = module.appendBlock(named: "default", to: function)
     currentReturnBlock = returnBlock
     
-    builder.positionAtEnd(of: entryBlock)
+    currentInsertion = module.endOf(entryBlock)
     if prototype.returnType.name != VoidStore().name {
-      let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: prototype.returnType), VoidStore()))
+      let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: ReferenceStore(pointee: prototype.returnType)), VoidStore()))
     }
     
     let selfIR = try parameterValues.findVariable(name: "self")
-    let typeIDRef = builder.buildStructGEP(selfIR, type: protocolType, index: 0)
-    let typeID = builder.buildLoad(typeIDRef, type: typeIDRef.type.getResolvedType())
+    let typeIDRef = module.insertGetStructElementPointer(of: selfIR, typed: protocolType, index: 0, at: currentInsertion)
+    let typeID = module.insertLoad(module.i32, from: typeIDRef, at: currentInsertion)
     
-    let typeSwitch = builder.buildSwitch(typeID, else: defaultBlock, caseCount: conformingTypes.count)
+    var cases = [(IRValue, BasicBlock)]()
+    
     for type in conformingTypes {
       if let typedFunction = type.functions.first(where: { $0.prototype.name == name }) {
-        let typeBlock = function.appendBasicBlock(named: type.name)
-        builder.positionAtEnd(of: typeBlock)
+        let typeBlock = module.appendBlock(named: type.name, to: function)
+        currentInsertion = module.endOf(typeBlock)
         // bitcast to type
-        let typedSelf = builder.buildCast(.bitCast, value: selfIR, type: type.IRRef!)
+        guard let typeIRRef = type.IRRef else { throw IRError.unknownType(type.name) }
+        let typedSelf = module.insertCast(.bitCast, selfIR, to: typeIRRef, at: currentInsertion)
         // call type version of function
         let typedFunctionIR = try emitMember(prototype: typedFunction.prototype, of: type)
-        var typedParameters = function.parameters
+        var typedParameters = Array(function.parameters) as! [any IRValue]
         typedParameters[0] = typedSelf
-        let call = builder.buildCall(typedFunctionIR, args: typedParameters)
+        let call = module.insertCall(typedFunctionIR, on: typedParameters, at: currentInsertion)
         
         if prototype.returnType.name != VoidStore().name {
-          builder.buildStore(call, to: try parameterValues.findVariable(name: ".return"))
+          module.insertStore(call, to: try parameterValues.findVariable(name: ".return"), at: currentInsertion)
         }
         let _ = try emitExpr(.return(nil, prototype.returnType))
         
-        typeSwitch.addCase(type.id!, typeBlock)
+        cases.append((module.i32.constant(type.id!), typeBlock))
       }
     }
     
-    builder.positionAtEnd(of: defaultBlock)
+    currentInsertion = module.endOf(entryBlock)
+    module.insertSwitch(on: typeID, cases: cases, default: defaultBlock, at: currentInsertion)
+
+    
+    currentInsertion = module.endOf(defaultBlock)
     if let defaultImpl = defaultImpl {
       try defaultImpl.typedExpr.forEach { let _ = try emitExpr($0) }
       if defaultImpl.prototype.returnType is VoidStore,
@@ -417,13 +423,13 @@ class IRGenerator {
       let _ = try emitExpr(.return(nil, VoidStore()))
     }
 
-    builder.positionAtEnd(of: returnBlock)
+    currentInsertion = module.endOf(returnBlock)
     if prototype.returnType.name == VoidStore().name {
-      builder.buildRetVoid()
+      module.insertReturn(at: currentInsertion)
     } else {
       let returnVar = try parameterValues.findVariable(name: ".return")
-      let returnVal = try value(from: returnVar, with: prototype.returnType)
-      builder.buildRet(returnVal)
+      let returnVal = try value(from: returnVar, with: ReferenceStore(pointee: prototype.returnType)).0
+      module.insertReturn(returnVal, at: currentInsertion)
     }
     
     parameterValues.endFrame()
@@ -434,10 +440,10 @@ class IRGenerator {
     if let function = module.function(named: prototype.name) {
       return function
     }
-    let argTypes = try prototype.params.map{ $0.type }.map{ try $0.findRef(types: typesByName) }
+    let argTypes = try prototype.params.map{ $0.type }.map{ try $0.findRef(types: typesByName, in: module) }
     
-    let funcType = try FunctionType(argTypes, prototype.returnType.findRef(types: typesByName))
-    let function = builder.addFunction(prototype.name, type: funcType)
+    let funcType = try FunctionType(from: argTypes, to: prototype.returnType.findRef(types: typesByName, in: module), isVarArg: false, in: &module)
+    let function = module.declareFunction(prototype.name, funcType)
     
     for (var param, name) in zip(function.parameters, prototype.params.map{ $0.name }) {
       param.name = name
@@ -449,42 +455,44 @@ class IRGenerator {
   @discardableResult
   func emitFunction(_ definition: FunctionDefinition) throws -> Function {
     let function = try emitPrototype(definition.prototype)
-    
+    currentFunction = function
     parameterValues.startFrame()
     
     for (idx, arg) in definition.prototype.params.enumerated() {
-      let param = function.parameter(at: idx)!
+      let param = function.parameters[idx]
       parameterValues.addStatic(name: arg.name, value: param)
     }
     
-    let entryBlock = function.appendBasicBlock(named: "entry")
-    let returnBlock = function.appendBasicBlock(named: "return")
+    let entryBlock = module.appendBlock(named: "entry", to: function)
+    let returnBlock = module.appendBlock(named: "return", to: function)
     currentReturnBlock = returnBlock
     
-    builder.positionAtEnd(of: entryBlock)
+    currentInsertion = module.endOf(entryBlock)
     
     if definition.prototype.returnType.name != VoidStore().name {
-      let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: definition.prototype.returnType), VoidStore()))
+      let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: ReferenceStore(pointee: definition.prototype.returnType)), VoidStore()))
     }
     
-    try definition.typedExpr.forEach { let _ = try emitExpr($0) }
+    try definition.typedExpr.forEach {
+      let _ = try emitExpr($0)
+    }
     
     if definition.prototype.returnType is VoidStore,
       !(definition.expr.last is Returnable) {
       let _ = try emitExpr(.return(nil, VoidStore()))
     }
     
-    builder.positionAtEnd(of: returnBlock)
+    currentInsertion = module.endOf(returnBlock)
     if definition.prototype.returnType.name == VoidStore().name {
-      builder.buildRetVoid()
+      module.insertReturn(at: currentInsertion)
     } else {
       let returnVar = try parameterValues.findVariable(name: ".return")
-      let returnVal = try value(from: returnVar, with: definition.prototype.returnType)
-      builder.buildRet(returnVal)
+      let returnVal = try value(from: returnVar, with: ReferenceStore(pointee: definition.prototype.returnType)).0
+      module.insertReturn(returnVal, at: currentInsertion)
     }
     
     parameterValues.endFrame()
-    
+    currentFunction = nil
     return function
   }
   
@@ -494,42 +502,42 @@ class IRGenerator {
         throw IRError.unknownType(type.name)
     }
     let function = try emitPrototype(definition.prototype)
-    
+    currentFunction = function
     parameterValues.startFrame()
     
     for (idx, arg) in definition.prototype.params.enumerated() {
-      let param = function.parameter(at: idx)!
+      let param = function.parameters[idx]
       parameterValues.addStatic(name: arg.name, value: param)
     }
     
-    let entryBlock = function.appendBasicBlock(named: "alloc")
+    let entryBlock = module.appendBlock(named: "alloc", to: function)
     
-    let returnBlock = function.appendBasicBlock(named: "return")
+    let returnBlock = module.appendBlock(named: "return", to: function)
     currentReturnBlock = returnBlock
     
-    builder.positionAtEnd(of: entryBlock)
-    let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: definition.prototype.returnType), VoidStore()))
+    currentInsertion = module.endOf(entryBlock)
+    let _ = try emitExpr(.variableDefinition(VariableDefinition(name: ".return", type: ReferenceStore(pointee: definition.prototype.returnType)), VoidStore()))
     
-    let selfPtr = builder.buildMalloc(llvmType)
+    let selfPtr = module.insertMalloc(llvmType, at: currentInsertion)
     parameterValues.addStatic(name: "self", value: selfPtr)
-    let typeIDPtr = builder.buildStructGEP(selfPtr, type: llvmType, index: 0)
-    builder.buildStore(register(type: type), to: typeIDPtr)
-    let arcPtr = builder.buildStructGEP(selfPtr, type: llvmType, index: 1)
-    builder.buildStore(UInt32(0), to: arcPtr)
+    let typeIDPtr = module.insertGetStructElementPointer(of: selfPtr, typed: llvmType, index: 0, at: currentInsertion)
+    module.insertStore(module.i32.constant(register(type: type)), to: typeIDPtr, at: currentInsertion)
+    let arcPtr = module.insertGetStructElementPointer(of: selfPtr, typed: llvmType, index: 1, at: currentInsertion)
+    module.insertStore(module.i32.zero, to: arcPtr, at: currentInsertion)
     
     try definition.typedExpr.forEach { let _ = try emitExpr($0) }
     
-    builder.positionAtEnd(of: returnBlock)
+    currentInsertion = module.endOf(returnBlock)
     let returnVar = try parameterValues.findVariable(name: ".return")
-    let returnVal = try value(from: returnVar, with: definition.prototype.returnType)
-    builder.buildRet(returnVal)
+    let returnVal = try value(from: returnVar, with: ReferenceStore(pointee: definition.prototype.returnType)).0
+    module.insertReturn(returnVal, at: currentInsertion)
     
     parameterValues.endFrame()
-    
+    currentFunction = nil
     return function
   }
   
-  func register(type: TypeDefinition) -> UInt32 {
+  func register(type: TypeDefinition) -> Int32 {
     typesByID[nextTypeID] = type
     type.id = nextTypeID
     defer {
@@ -541,32 +549,33 @@ class IRGenerator {
   func emitExpr(_ expr: TypedExpr) throws -> (IRValue, StoredType) {
     switch expr {
     case .variableDefinition(let definition, let type):
-      let newVar = builder.buildAlloca(type: try definition.type.findRef(types: typesByName), name: definition.name)
+      let newVar = module.insertAlloca(try definition.type.findRef(types: typesByName, in: module), at: currentInsertion)
       parameterValues.addVariable(name: definition.name, value: newVar)
-      return (VoidType().undef(), type)
+      return (Undefined(of: module.void), type)
     case .variable(let name, let type):
       let value = try parameterValues.findVariable(name: name)
       return (value, type)
     case .memberDereference(let instance, .property(let member), let type):
         let (instanceIR, instanceType) = try emitExpr(instance)
-        guard let matchingType = typesByName[instanceType.name] else {
-          throw IRError.unknownType(instanceType.name)
+      guard let matchingType = typesByName[instanceType.resolvedType.name] else {
+        throw IRError.unknownType(instanceType.resolvedType.name)
         }
         let members = matchingType.properties.enumerated().filter{ $1.0 == member }
         guard let (elementIndex, _) = members.first else {
             throw IRError.unknownMember(member)
         }
-      let memberRef = builder.buildStructGEP(instanceIR, type: try instanceType.findType(types: typesByName), index: elementIndex + kInternalPropertiesCount, name: member)
+      let resolvedInstanceIR = try value(from: instanceIR, with: instanceType).0
+      let memberRef = module.insertGetStructElementPointer(of: resolvedInstanceIR, typed: StructType(try instanceType.resolvedType.findType(types: typesByName, in: module))!, index: elementIndex + kInternalPropertiesCount, at: currentInsertion)
       return (memberRef, type)
     case .memberDereference(let instance, .function(let functionCall), let type):
-      let (instanceIR, instanceType) = try emitExprAndLoad(expr: instance)
+      let (instanceIR, instanceType) = try emitExpr(instance)
       
-      guard let matchingType = typesByName[instanceType.name] else {
-        throw IRError.unknownMemberFunction(functionCall.name)
+      guard let matchingType = typesByName[((instanceType as? ReferenceStore)?.pointee ?? instanceType).name] else {
+        throw IRError.unknownMemberFunction(functionCall.name, in: instanceType.name)
       }
       let functions = matchingType.prototypes.filter{ $0.name == functionCall.name }
       guard let function = functions.first else {
-        throw IRError.unknownMemberFunction(functionCall.name)
+        throw IRError.unknownMemberFunction(functionCall.name, in: matchingType.name)
       }
       guard function.params.count == functionCall.args.count else {
         throw IRError.wrongNumberOfArgs(functionCall.name,
@@ -581,29 +590,36 @@ class IRGenerator {
         }
       }
       let llvmFunction = try emitMember(prototype: function, of: matchingType)
-      let callArgs = try functionCall.args.map{$0.typedExpr}.map(emitExprAndLoad).map { $0.0 }
-      let callReturn = builder.buildCall(llvmFunction, args: [instanceIR] + callArgs)
+      let callArgs = try functionCall.args.map{
+        $0.typedExpr
+      }.map(emitExprAndLoad)
+        .map {
+          $0.0
+        }
+      let callReturn = module.insertCall(llvmFunction, on: [try value(from: instanceIR, with: instanceType).0] + callArgs, at: currentInsertion)
       return (callReturn, type)
     case .variableAssignment(let variable, let expr, let type):
       let (variablePointer, ptrType) = try emitExpr(variable)
       let (value, valueType) = try emitExpr(expr)
       var castValue = value
-      if ptrType.name != valueType.name {
-        castValue = builder.buildCast(.bitCast, value: value, type: try ptrType.findRef(types: typesByName))
+      let resolvedType = (ptrType as? ReferenceStore)?.pointee ?? type
+      if resolvedType.name != valueType.name {
+        castValue = module.insertCast(.bitCast, value, to: try resolvedType.findRef(types: typesByName, in: module), at: currentInsertion)
       }
-      
-      builder.buildStore(castValue, to: variablePointer)
-      return (VoidType().undef(), type)
+      module.insertStore(castValue, to: variablePointer, at: currentInsertion)
+
+      return (Undefined(of: module.void), type)
 
     case .literal(.double(let value), let type):
-      return (FloatType.double.constant(value), type)
+      return (module.double.constant(value), type)
     case .literal(.float(let value), let type):
-      return (FloatType.float.constant(Double(value)), type)
+      return (module.float.constant(Double(value)), type)
     case .literal(.integer(let value), let type):
-      return (value.asLLVM(), type)
+      // TODO: Define as natural width int
+      return (module.i64.constant(value), type)
     case .literal(.string(let parts), let type):
       if case let .string(string) = parts.first {
-        let globalString = builder.buildGlobalStringPtr(string)
+        let globalString = module.insertGlobalStringPointer(string, name: "", at: currentInsertion)
         return (globalString, type)
       }
       throw IRError.unknownType("String with parts")
@@ -613,53 +629,73 @@ class IRGenerator {
       let result: IRValue
       switch op {
       case .plus:
-        result = builder.buildAdd(lhsVal, rhsVal)
+        if FloatingPointType(lhsVal.type) != nil {
+          result = module.insertFAdd(lhsVal, rhsVal, at: currentInsertion)
+        } else {
+          result = module.insertAdd(lhsVal, rhsVal, at: currentInsertion)
+        }
       case .minus:
-        result = builder.buildSub(lhsVal, rhsVal)
+        if FloatingPointType(lhsVal.type) != nil {
+          result = module.insertFSub(lhsVal, rhsVal, at: currentInsertion)
+        } else {
+          result = module.insertSub(lhsVal, rhsVal, at: currentInsertion)
+        }
       case .divide:
-        result = builder.buildDiv(lhsVal, rhsVal)
+        if FloatingPointType(lhsVal.type) != nil {
+          result = module.insertFDiv(lhsVal, rhsVal, at: currentInsertion)
+        } else {
+          result = module.insertUnsignedDiv(lhsVal, rhsVal, at: currentInsertion)
+        }
       case .times:
-        result = builder.buildMul(lhsVal, rhsVal)
+        if FloatingPointType(lhsVal.type) != nil {
+          result = module.insertFMul(lhsVal, rhsVal, at: currentInsertion)
+        } else {
+          result = module.insertMul(lhsVal, rhsVal, at: currentInsertion)
+        }
       case .mod:
-        result = builder.buildRem(lhsVal, rhsVal)
+        if FloatingPointType(lhsVal.type) != nil {
+          result = module.insertFRem(lhsVal, rhsVal, at: currentInsertion)
+        } else {
+          result = module.insertSignedRem(lhsVal, rhsVal, at: currentInsertion)
+        }
       }
       return (result, type)
     case .logical(let lhs, let op, let rhs, let type):
-      let (lhsVal, _) = try emitExprAndLoad(expr: lhs)
-      let (rhsVal, _) = try emitExprAndLoad(expr: rhs)
+      let (lhsVal, lhsType) = try emitExprAndLoad(expr: lhs)
+      let (rhsVal, rhsType) = try emitExprAndLoad(expr: rhs)
       
-      let lhsCond = try lhsVal.truthify(builder: builder)
-      let rhsCond = try rhsVal.truthify(builder: builder)
+      let lhsCond = try truthify(lhsVal, with: lhsType)
+      let rhsCond = try truthify(rhsVal, with: rhsType)
       
-      var comparisonType: (float: RealPredicate, int: IntPredicate)? = nil
+      var comparisonType: (float: FloatingPointPredicate, int: IntegerPredicate)? = nil
       
       switch op {
       case .and:
-        let intRes = builder.buildAnd(lhsCond, rhsCond)
+        let intRes = module.insertBitwiseAnd(lhsCond, rhsCond, at: currentInsertion)
         return (intRes, type)
       case .or:
-        let intRes = builder.buildOr(lhsCond, rhsCond)
+        let intRes = module.insertBitwiseOr(lhsCond, rhsCond, at: currentInsertion)
         return (intRes, type)
       case .equals:
-        comparisonType = (.orderedEqual, .equal)
+        comparisonType = (.oeq, .eq)
       case .notEqual:
-        comparisonType = (.orderedNotEqual, .notEqual)
+        comparisonType = (.one, .ne)
       case .lessThan:
-        comparisonType = (.orderedLessThan, .signedLessThan)
+        comparisonType = (.olt, .slt)
       case .lessThanOrEqual:
-        comparisonType = (.orderedLessThanOrEqual, .signedLessThanOrEqual)
+        comparisonType = (.ole, .sle)
       case .greaterThan:
-        comparisonType = (.orderedGreaterThan, .signedGreaterThan)
+        comparisonType = (.ogt, .sgt)
       case .greaterThanOrEqual:
-        comparisonType = (.orderedGreaterThanOrEqual, .signedGreaterThanOrEqual)
+        comparisonType = (.oge, .sge)
       }
-      if lhsVal.type is FloatType,
-        rhsVal.type is FloatType {
-        return (builder.buildFCmp(lhsVal, rhsVal, comparisonType!.float), type)
+      if lhsVal.type is FloatingPointType,
+        rhsVal.type is FloatingPointType {
+        return (module.insertFloatingPointComparison( comparisonType!.float, lhsVal, rhsVal, at: currentInsertion), type)
       }
-      if lhsVal.type is IntType,
-        rhsVal.type is IntType {
-        return (builder.buildICmp(lhsVal, rhsVal, comparisonType!.int), type)
+      if lhsVal.type is IntegerType,
+        rhsVal.type is IntegerType {
+        return (module.insertIntegerComparison(comparisonType!.int, lhsVal, rhsVal, at: currentInsertion), type)
       }
       throw IRError.unableToCompare(lhsVal.type, rhsVal.type)
       
@@ -681,7 +717,7 @@ class IRGenerator {
       }
       let callArgs = try functionCall.args.map{$0.typedExpr}.map(emitExprAndLoad).map { $0.0 }
       let function = try emitPrototype(prototype)
-      return (builder.buildCall(function, args: callArgs), type)
+      return (module.insertCall(function, on: callArgs, at: currentInsertion), type)
     case .return(let expr, let type):
       guard let returnBlock = currentReturnBlock else {
         throw IRError.returnOutsideFunction
@@ -689,163 +725,167 @@ class IRGenerator {
       if let expr = expr {
         let (innerVal, _) = try emitExprAndLoad(expr: expr)
         let returnVar = try parameterValues.findVariable(name: ".return")
-        builder.buildStore(innerVal, to: returnVar)
+        module.insertStore(innerVal, to: returnVar, at: currentInsertion)
       }
-      return (builder.buildBr(returnBlock), type)
+      return (module.insertBr(to: returnBlock, at: currentInsertion), type)
     case .ifelse(let cond, let thenBlock, let elseBlock, let type):
-      let (condition, _) = try emitExprAndLoad(expr: cond)
-      let truthCondition = try condition.truthify(builder: builder)
-      let checkCond = builder.buildICmp(truthCondition,
-                                        (truthCondition.type as! IntType).zero(),
-                                        .notEqual)
+      let (condition, conditionType) = try emitExprAndLoad(expr: cond)
+      let truthCondition = try truthify(condition, with: conditionType)
+      let checkCond = module.insertIntegerComparison(.ne, truthCondition, (truthCondition.type as! IntegerType).zero, at: currentInsertion)
       
-      let thenBB = builder.currentFunction!.appendBasicBlock(named: "then")
-      let elseBB = builder.currentFunction!.appendBasicBlock(named: "else")
-      let mergeBB = builder.currentFunction!.appendBasicBlock(named: "merge")
+      let thenBB = module.appendBlock(named: "then", to: currentFunction)
+      let elseBB = module.appendBlock(named: "else", to: currentFunction)
+      let mergeBB = module.appendBlock(named: "merge", to: currentFunction)
       
-      builder.buildCondBr(condition: checkCond, then: thenBB, else: elseBB)
+      module.insertCondBr(if: checkCond, then: thenBB, else: elseBB, at: currentInsertion)
       
-      builder.positionAtEnd(of: thenBB)
+      currentInsertion = module.endOf(thenBB)
       try thenBlock.forEach { let _ = try emitExpr($0) }
       if case .return = thenBlock.last {
         // No need to branch because we already returned
       } else {
-        builder.buildBr(mergeBB)
+        module.insertBr(to: mergeBB, at: currentInsertion)
       }
       
-      builder.positionAtEnd(of: elseBB)
+      currentInsertion = module.endOf(elseBB)
       try elseBlock.forEach { let _ = try emitExpr($0) }
       if case .return = elseBlock.last {
         // No need to branch because we already returned
       } else {
-        builder.buildBr(mergeBB)
+        module.insertBr(to: mergeBB, at: currentInsertion)
       }
       
-      builder.positionAtEnd(of: mergeBB)
+      currentInsertion = module.endOf(mergeBB)
       
-      return (VoidType().undef(), type)
+      return (Undefined(of: module.void), type)
     case .forLoop(let ass, let cond, let body, let type):
       parameterValues.startFrame()
       defer {
         parameterValues.endFrame()
       }
-      let startBB = builder.currentFunction!.appendBasicBlock(named: "setup")
-      let bodyBB = builder.currentFunction!.appendBasicBlock(named: "body")
-      let cleanupBB = builder.currentFunction!.appendBasicBlock(named: "cleanup")
+      let startBB = module.appendBlock(named: "setup", to: currentFunction)
+      let bodyBB = module.appendBlock(named: "body", to: currentFunction)
+      let cleanupBB = module.appendBlock(named: "cleanup", to: currentFunction)
       
-      builder.buildBr(startBB)
+      module.insertBr(to: startBB, at: currentInsertion)
       
-      builder.positionAtEnd(of: startBB)
+      currentInsertion = module.endOf(startBB)
       let _ = try emitExpr(ass)
-      let (startCondition, _) = try emitExpr(cond)
-      let startTruthCondition = try startCondition.truthify(builder: builder)
-      let startCheckCond = builder.buildICmp(startTruthCondition,
-                                        (startTruthCondition.type as! IntType).zero(),
-                                        .notEqual)
-      builder.buildCondBr(condition: startCheckCond, then: bodyBB, else: cleanupBB)
+      let (startCondition, startConditionType) = try emitExpr(cond)
+      let startTruthCondition = try truthify(startCondition, with: startConditionType)
+      let startCheckCond = module.insertIntegerComparison(.ne, startTruthCondition, (startTruthCondition.type as! IntegerType).zero, at: currentInsertion)
+      module.insertCondBr(if: startCheckCond, then: bodyBB, else: cleanupBB, at: currentInsertion)
 
       
-      builder.positionAtEnd(of: bodyBB)
+      currentInsertion = module.endOf(bodyBB)
       try body.forEach { let _ = try emitExpr($0) }
-      let (endCondition, _) = try emitExpr(cond)
-      let endTruthCondition = try endCondition.truthify(builder: builder)
-      let endCheckCond = builder.buildICmp(endTruthCondition,
-                                        (endTruthCondition.type as! IntType).zero(),
-                                        .notEqual)
-      builder.buildCondBr(condition: endCheckCond, then: bodyBB, else: cleanupBB)
-      builder.positionAtEnd(of: cleanupBB)
+      let (endCondition, endConditionType) = try emitExpr(cond)
+      let endTruthCondition = try truthify(endCondition, with: endConditionType)
+      let endCheckCond = module.insertIntegerComparison(.ne, endTruthCondition, (endTruthCondition.type as! IntegerType).zero, at: currentInsertion)
+      module.insertCondBr(if: endCheckCond, then: bodyBB, else: cleanupBB, at: currentInsertion)
+      currentInsertion = module.endOf(cleanupBB)
       
-      return (VoidType().undef(), type)
+      return (Undefined(of: module.void), type)
     case .whileLoop(let cond, let body, let type):
       parameterValues.startFrame()
       defer {
         parameterValues.endFrame()
       }
-      let startBB = builder.currentFunction!.appendBasicBlock(named: "setup")
-      let bodyBB = builder.currentFunction!.appendBasicBlock(named: "body")
-      let cleanupBB = builder.currentFunction!.appendBasicBlock(named: "cleanup")
+      let startBB = module.appendBlock(named: "setup", to: currentFunction)
+      let bodyBB = module.appendBlock(named: "body", to: currentFunction)
+      let cleanupBB = module.appendBlock(named: "cleanup", to: currentFunction)
       
-      builder.positionAtEnd(of: startBB)
-      let (startCondition, _) = try emitExpr(cond)
-      let startTruthCondition = try startCondition.truthify(builder: builder)
-      let startCheckCond = builder.buildICmp(startTruthCondition,
-                                             (startTruthCondition.type as! IntType).zero(),
-                                             .notEqual)
-      builder.buildCondBr(condition: startCheckCond, then: bodyBB, else: cleanupBB)
+      module.insertBr(to: startBB, at: currentInsertion)
+      let (startCondition, startConditionType) = try emitExpr(cond)
+      let startTruthCondition = try truthify(startCondition, with: startConditionType)
+      let startCheckCond = module.insertIntegerComparison(.ne, startTruthCondition, (startTruthCondition.type as! IntegerType).zero, at: currentInsertion)
+      module.insertCondBr(if: startCheckCond, then: bodyBB, else: cleanupBB, at: currentInsertion)
       
-      builder.positionAtEnd(of: bodyBB)
+      currentInsertion = module.endOf(bodyBB)
       try body.forEach { let _ = try emitExpr($0) }
-      let (endCondition, _) = try emitExpr(cond)
-      let endTruthCondition = try endCondition.truthify(builder: builder)
-      let endCheckCond = builder.buildICmp(endTruthCondition,
-                                           (endTruthCondition.type as! IntType).zero(),
-                                           .notEqual)
-      builder.buildCondBr(condition: endCheckCond, then: bodyBB, else: cleanupBB)
-      builder.positionAtEnd(of: cleanupBB)
+      let (endCondition, endConditionType) = try emitExpr(cond)
+      let endTruthCondition = try truthify(endCondition, with: endConditionType)
+      let endCheckCond = module.insertIntegerComparison(.ne, endTruthCondition, (endTruthCondition.type as! IntegerType).zero, at: currentInsertion)
+      module.insertCondBr(if: endCheckCond, then: bodyBB, else: cleanupBB, at: currentInsertion)
+      currentInsertion = module.endOf(cleanupBB)
       
-      return (VoidType().undef(), type)
+      return (Undefined(of: module.void), type)
     }
   }
   
   func emitExprAndLoad(expr: TypedExpr) throws -> (IRValue, StoredType) {
     let (reference, refType) = try emitExpr(expr)
     let loaded = try value(from: reference, with: refType)
-    return (loaded, refType)
+    return loaded
   }
   
-  func value(from variable: IRValue, with expectedType: StoredType) throws -> (IRValue) {
-    guard let type = variable.type as? PointerType else {
-      return variable
+  func value(from variable: IRValue, with expectedType: StoredType) throws -> (IRValue, StoredType) {
+    guard let loadedType = try expectedType.loadedRef(types: typesByName, in: &module) else {
+      return (variable, expectedType)
     }
-    // Make sure IRRef is populated
-    let expectedIRType = try expectedType.findRef(types: typesByName)
-    let expectedIRTypePtr = PointerType(pointee: expectedIRType)
-    if type.asLLVM() == expectedIRTypePtr.asLLVM() {
-      return builder.buildLoad(variable, type: type.pointee)
-    } else if type.asLLVM() == expectedIRType.asLLVM() {
-      return variable
-    } else {
-      throw IRError.unknownType(expectedType.name)
+    guard let referencedType = (expectedType as? ReferenceStore)?.pointee else {
+      return (variable, expectedType)
     }
+    return (module.insertLoad(loadedType, from: variable, at: currentInsertion), referencedType)
   }
   
   func stringPrintFormat() -> IRValue {
     guard let format = module.global(named: "StringPrintFormat") else {
-      return builder.buildGlobalStringPtr("%s\n", name: "StringPrintFormat")
+      return module.insertGlobalStringPointer("%s\n", name: "StringPrintFormat", at: currentInsertion)
     }
-    return format.constGEP(indices: [IntType.int1.zero(), IntType.int1.zero()])
+    let stringType = PointerType(pointee: IntegerType(8, in: &module), in: &module)
+    return module.insertGetConstantElementPointer(of: format, typed: stringType, indices: [module.i1.zero, module.i1.zero])
+  }
+  
+  func truthify(_ val: IRValue, with type: StoredType) throws -> IRValue {
+    let (loadedValue, _) = try value(from: val, with: type)
+    return try loadedValue.truthify(at: currentInsertion, in: &module)
   }
 }
 
 extension StoredType {
-  func findType(types: [String: CallableType]) throws -> IRType {
+  func findType(types: [String: CallableType], in module: Module) throws -> IRType {
+    self.module = module
     if let type = IRType {
       return type
     }
     guard let typeDef = types[name],
-      let type = typeDef.IRType else {
+          let type = typeDef.IRType else {
       throw IRError.unknownType(name)
     }
     IRType = type
     return type
   }
   
-  func findRef(types: [String: CallableType]) throws -> IRType {
+  func findRef(types: [String: CallableType], in module: Module) throws -> IRType {
+    self.module = module
     if let ref = IRRef {
       return ref
     }
     guard let typeDef = types[name],
-      let ref = typeDef.IRRef else {
-        throw IRError.unknownType(name)
+          let ref = typeDef.IRRef else {
+      throw IRError.unknownType(name)
     }
     IRRef = ref
     return ref
   }
+  
+  func loadedType(types: [String: any CallableType], in module: inout Module) throws -> IRType? {
+    nil
+  }
+  
+  func loadedRef(types: [String: any CallableType], in module: inout Module) throws -> IRType? {
+    nil
+  }
+  
+  var resolvedType: any StoredType {
+    self
+  }
 }
 
 extension IRValue {
-  func truthify(builder: IRBuilder) throws -> IRValue {
-    if let truthVal = self.type.truthify(value:self, with: builder) {
+  func truthify(at p: InsertionPoint, in module: inout Module) throws -> IRValue {
+    if let truthVal = self.type.truthify(value: self, at: p, in: &module) {
       return truthVal
     }
     throw IRError.nonTruthyType(self.type)
@@ -853,58 +893,51 @@ extension IRValue {
 }
 
 extension IRType {
-  func truthify(value: IRValue, with builder: IRBuilder) -> IRValue? {
+  func truthify(value: IRValue, at p: InsertionPoint, in module: inout Module) -> IRValue? {
     if let truthable = self as? Truthable {
-      return truthable.truthy(value: value, with: builder)
+      return truthable.truthy(value: value, at: p, in: &module)
     }
     return nil
-  }
-  
-  func getResolvedType() -> IRType {
-    var type: IRType = self
-    while let pointer = type as? PointerType {
-      type = pointer.pointee
-    }
-    return type
   }
 }
 
 protocol Truthable {
-  func truthy(value: IRValue, with builder: IRBuilder) -> IRValue
+  func truthy(value: IRValue, at p: InsertionPoint, in module: inout Module) -> IRValue
 }
 
-extension FloatType: Truthable {
-  func truthy(value: IRValue, with builder: IRBuilder) -> IRValue {
-    return builder.buildFPToInt(value, type: .int1, signed: false)
+extension FloatingPointType: Truthable {
+  func truthy(value: IRValue, at p: InsertionPoint, in module: inout Module) -> IRValue {
+    return module.insertFPtoInt(value, to: module.i1, signed: false, at: p)
   }
 }
 
-extension IntType: Truthable {
-  func truthy(value: IRValue, with builder: IRBuilder) -> IRValue {
+extension IntegerType: Truthable {
+  func truthy(value: IRValue, at p: InsertionPoint, in module: inout Module) -> IRValue {
     return value
   }
 }
 
 protocol Printable {
-  func printFormat(module: Module, builder: IRBuilder) -> IRValue
+  func printFormat(module: inout Module, at p: InsertionPoint) -> IRValue
 }
 
-extension IntType: Printable {
-  func printFormat(module: Module, builder: IRBuilder) -> IRValue {
+extension IntegerType: Printable {
+  func printFormat(module: inout Module, at p: InsertionPoint) -> IRValue {
     guard let format = module.global(named: "IntPrintFormat") else {
-      return builder.buildGlobalStringPtr("%d\n", name: "IntPrintFormat")
+      return module.insertGlobalStringPointer("%d\n", name: "IntPrintFormat", at: p)
     }
-    return format.constGEP(indices: [IntType.int1.zero(), IntType.int1.zero()])
+    let stringType = PointerType(pointee: IntegerType(8, in: &module), in: &module)
+    return module.insertGetConstantElementPointer(of: format, typed: stringType, indices: [module.i1.zero, module.i1.zero])
   }
 }
 
-extension FloatType: Printable {
-  func printFormat(module: Module, builder: IRBuilder) -> IRValue {
+extension FloatingPointType: Printable {
+  func printFormat(module: inout Module, at p: InsertionPoint) -> IRValue {
     guard let format = module.global(named: "FloatPrintFormat") else {
-      return builder.buildGlobalStringPtr("%f\n", name: "FloatPrintFormat")
+      return module.insertGlobalStringPointer("%f\n", name: "FloatPrintFormat", at: p)
     }
-    return format.constGEP(indices: [IntType.int1.zero(), IntType.int1.zero()])
+    let stringType = PointerType(pointee: IntegerType(8, in: &module), in: &module)
+    return module.insertGetConstantElementPointer(of: format, typed: stringType, indices: [module.i1.zero, module.i1.zero])
   }
 }
-
 

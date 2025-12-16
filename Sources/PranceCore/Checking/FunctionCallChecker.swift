@@ -29,8 +29,9 @@ final class FunctionCallChecker: ASTChecker {
       }
       try checkCallArgs(call: functionCall, args: prototype.params)
     case .memberDereference(let instance, .function(let call), _):
-      guard let instanceType = allTypes[instance.type.name] else {
-        throw ParseError.typeDoesNotContainMembers(instance.type.name)
+      let instanceType = (instance.type as? ReferenceStore)?.pointee ?? instance.type
+      guard let instanceType = allTypes[instanceType.name] else {
+        throw ParseError.typeDoesNotContainMembers(instanceType.name)
       }
       guard let prototype = instanceType.prototypes.first(where: { $0.name == call.name }) else {
         throw ParseError.unknownFunction(call.name)
@@ -47,8 +48,8 @@ final class FunctionCallChecker: ASTChecker {
         throw ParseError.unexpectedArgumentInCall(got: passedArg.label ?? "", expected: functionArg.name)
       }
       let validTypes = validTypeNames(for: functionArg.type)
-      if !validTypes.contains(passedArg.typedExpr.type.name) {
-        throw ParseError.wrongType(expectedType: functionArg.type.name, for: functionArg.name, got: passedArg.typedExpr.type.name)
+      if !validTypes.contains(passedArg.typedExpr.type.resolvedType.name) {
+        throw ParseError.wrongType(expectedType: functionArg.type.name, for: functionArg.name, got: passedArg.typedExpr.type.resolvedType.name)
       }
       try validateCallExpr(expr: passedArg.typedExpr)
     }

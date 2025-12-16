@@ -1,4 +1,4 @@
-// swift-tools-version:5.2
+// swift-tools-version:6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "Prance",
     platforms: [
-      .macOS(.v10_14),
+      .macOS(.v26),
     ],
     products: [
       .executable(
@@ -18,13 +18,13 @@ let package = Package(
         targets: ["PranceCore"])
     ],
     dependencies: [
-      .package(name:"LLVM", url: "https://github.com/trill-lang/LLVMSwift.git", .branch("master"))
+        .package(url: "https://github.com/tristan-burnside/Swifty-LLVM.git", branch:"main")
     ],
     targets: [
         .target(
           name: "PranceCore",
-          dependencies:["LLVM"]),
-        .target(
+          dependencies:[.product(name: "SwiftyLLVM", package:"Swifty-LLVM")]),
+        .executableTarget(
             name: "Prance",
             dependencies: ["PranceCore"])
     ]

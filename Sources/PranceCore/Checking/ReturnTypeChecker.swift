@@ -23,8 +23,8 @@ final class ReturnTypeChecker: ASTChecker {
           throw ParseError.unexpectedReturn
         }
         let validReturnTypes = validTypeNames(for: returnVar)
-        guard validReturnTypes.contains(returnType.name) else {
-          throw ParseError.returnTypeMismatch(expected: returnVar.name, got: returnType.name)
+        guard validReturnTypes.contains(returnType.resolvedType.name) else {
+          throw ParseError.returnTypeMismatch(expected: returnVar.name, got: returnType.resolvedType.name)
         }
       default:
         break

@@ -1,4 +1,4 @@
-import LLVM
+import SwiftyLLVM
 
 struct Prototype {
   let name: String
@@ -33,7 +33,7 @@ protocol CallableType {
 
 final class TypeDefinition: CallableType {
   let name: String
-  var id: UInt32? = nil
+  var id: Int32? = nil
   var IRType: StructType? = nil
   var IRRef: PointerType? = nil
   let properties: [(String, StoredType)]
@@ -56,9 +56,7 @@ final class TypeDefinition: CallableType {
     let variables = properties.map { (name, type) in
       return VariableDefinition(name: name, type: type)
     }
-    guard let type = CustomStore(name: name) else {
-      fatalError("Type \(name) could not be created")
-    }
+    let type = CustomStore(name: name)
     
     var initExpr = [Expr]()
     for variable in variables {

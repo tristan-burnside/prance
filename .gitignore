@@ -5,3 +5,4 @@ Package.resolved
 samples/demo
 samples/demo.ll
 samples/demo.o
+.DS_Store

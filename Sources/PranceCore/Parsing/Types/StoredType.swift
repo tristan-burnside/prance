@@ -1,11 +1,16 @@
-import LLVM
+import SwiftyLLVM
 
-protocol StoredType: class {
+protocol StoredType: AnyObject {
   var IRType: IRType? { get set }
   var IRRef: IRType? { get set }
   var name: String { get }
-
-  init?(name: String)
+  
+  var module: Module? { get set }
+  
+  func loadedType(types: [String: any CallableType], in module: inout Module) throws -> IRType?
+  func loadedRef(types: [String: any CallableType], in module: inout Module) throws -> IRType?
+  
+  var resolvedType: StoredType { get }
 }
 
 final class CustomStore: StoredType {
@@ -14,7 +19,50 @@ final class CustomStore: StoredType {
   var IRRef: IRType? = nil
   let name: String
   
-  init?(name: String) {
+  init(name: String) {
     self.name = name
+  }
+  
+  var module: Module?
+}
+
+final class ReferenceStore: StoredType {
+  var IRType: IRType? {
+    get {
+      guard var module else { fatalError() }
+      return PointerType(in: &module)
+    }
+    set {
+      // Nothing to see here
+    }
+  }
+  var IRRef: IRType? {
+    get {
+      guard var module else { fatalError() }
+      return PointerType(in: &module)
+    }
+    set {
+      // Nothing to see here
+    }
+  }
+  let name: String = "Pointer"
+  var module: Module?
+  
+  let pointee: StoredType
+  
+  init(pointee: StoredType) {
+    self.pointee = pointee
+  }
+  
+  func loadedType(types: [String : any CallableType], in module: inout Module) throws -> (any IRType)? {
+    try pointee.findType(types: types, in: module)
+  }
+  
+  func loadedRef(types: [String : any CallableType], in module: inout Module) throws -> (any IRType)? {
+    try pointee.findRef(types: types, in: module)
+  }
+  
+  var resolvedType: any StoredType {
+    return pointee
   }
 }

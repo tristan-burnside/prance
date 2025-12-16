@@ -44,7 +44,7 @@ extension ASTChecker {
     let parameterValues = StackMemory<StoredType>()
       for type in file.customTypes {
         parameterValues.startFrame()
-        parameterValues.addVariable(name: "self", value: CustomStore(name: type.name)!)
+        parameterValues.addVariable(name: "self", value: CustomStore(name: type.name))
         for function in type.functions {
           parameterValues.startFrame()
           parameterValues.addVariable(name: ".return", value: function.prototype.returnType)
@@ -55,7 +55,7 @@ extension ASTChecker {
           parameterValues.endFrame()
         }
         parameterValues.startFrame()
-        parameterValues.addVariable(name: ".return", value: CustomStore(name: type.name)!)
+        parameterValues.addVariable(name: ".return", value: CustomStore(name: type.name))
         for arg in type.initMethod.prototype.params {
           parameterValues.addVariable(name: arg.name, value: arg.type)
         }
@@ -113,7 +113,7 @@ extension ASTChecker {
       try checkRecursive(expr: cond, parameterValues: parameterValues, checker: checker)
       try body.forEach { try checkRecursive(expr: $0, parameterValues: parameterValues, checker: checker) }
     case .variableDefinition(let definition, _):
-      parameterValues.addVariable(name: definition.name, value: definition.type)
+      parameterValues.addVariable(name: definition.name, value: ReferenceStore(pointee: definition.type))
     case .literal, .variable:
       break
     }

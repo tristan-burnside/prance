@@ -29,8 +29,9 @@ final class PropertyReferenceChecker: ASTChecker {
   }
   
   private func getTypeDefinition(for type: StoredType) throws -> CallableType {
-    guard let typeDefinition = allTypes[type.name] else {
-      throw ParseError.typeDoesNotContainMembers(type.name)
+    let instanceType = (type as? ReferenceStore)?.pointee ?? type
+    guard let typeDefinition = allTypes[instanceType.name] else {
+      throw ParseError.typeDoesNotContainMembers(instanceType.name)
     }
     return typeDefinition
   }

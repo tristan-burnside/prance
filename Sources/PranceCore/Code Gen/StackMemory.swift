@@ -1,4 +1,4 @@
-import LLVM
+import SwiftyLLVM
 
 final class StackMemory<Value> {
   private var frames: [StackFrame<Value>]

@@ -120,17 +120,14 @@ enum ParseError: Error {
   case functionDoesNotMatchDeclaration(String, inType: String)
 }
 
-extension String {
-  var types: [StoredType.Type] {
-    return [DoubleStore.self, IntStore.self, FloatStore.self, StringStore.self, CustomStore.self]
-  }
-  
+extension String {  
   func toType() -> StoredType? {
-    for type in types {
-      if let store = type.init(name: self) {
-        return store
-      }
+    switch self {
+      case "Double": return DoubleStore()
+    case "Int": return IntStore()
+    case "Float": return FloatStore()
+    case "String": return StringStore()
+    default: return CustomStore(name: self)
     }
-    return nil
   }
 }

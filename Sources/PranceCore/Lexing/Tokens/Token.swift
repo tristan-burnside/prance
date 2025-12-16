@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol Tokenizable {
+protocol Tokenizable: Sendable {
   var isExecutable: Bool { get }
 }
 
