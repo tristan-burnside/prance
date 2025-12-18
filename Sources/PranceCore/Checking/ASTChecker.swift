@@ -114,6 +114,8 @@ extension ASTChecker {
       try body.forEach { try checkRecursive(expr: $0, parameterValues: parameterValues, checker: checker) }
     case .variableDefinition(let definition, _):
       parameterValues.addVariable(name: definition.name, value: ReferenceStore(pointee: definition.type))
+    case .formatString(let exprs, _):
+      break
     case .literal, .variable:
       break
     }

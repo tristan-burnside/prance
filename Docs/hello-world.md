@@ -7,7 +7,8 @@ Code:
 Output:
 `Hello World`
 
-This uses the only built in function of the language `print(line:)`. This function prints to Stdout.
+This uses one of the 2 built in functions of the language `print(line:)`. This function prints to stdout.
+The other built in function is scanLine() that waits for a line of input on stdin and returns a string.
 
 Note: to make it easier for others to understand the intent of your code it can be useful
 to add inline comments, these start with '//'

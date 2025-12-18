@@ -17,6 +17,7 @@ Support for:
   - protocol conformance
 - protocols
   - functions
+  - default implementations
 - arithmetic operators
 - logical comparators
 
@@ -24,22 +25,20 @@ Support for:
 To learn more about the language please read the [language guide](./Docs/intro.md).
 
 ## Getting started
-get llvm `brew install llvm@11`
+get llvm `brew install llvm@21`
 
 clone this repo 
 
-run `swift build`
+run `swift ./utils/make-pkgconfig.swift`
 
-run `swift package generate-xcodeproj`
+install pkgconfig `brew install pkgconfig`
 
-open `prance.xcodeproj`
-
-run `swift ./DerivedData/prance/SourcePackages/checkouts/LLVMSwift/utils/make-pkgconfig.swift`
+open `Package.swift`
 
 build in XCode
 
 compiled `Prance` binary should reside in ./DerivedData/Prance/Build/Products/Debug/Prance
 
-compile the demo code at `samples/demo.prance` by calling `./Prance demo.prance`
+compile the demo code at `samples/demo.prance` by calling `<Path to prance>/Prance ./samples/demo.prance` or using the run action on the Prance scheme.
 
-run the demo code `./demo`
+run the demo code `./samples/demo`

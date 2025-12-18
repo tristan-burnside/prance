@@ -38,3 +38,6 @@ defined by sourrounding the characters in '""'.
 
 `"Hello"`
 `"Tristan"`
+
+You can substitute current variable values into a string at creation using `\(<code>)`. 
+Note: All such strings are currently limited to 1000 chars

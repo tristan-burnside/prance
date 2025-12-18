@@ -26,6 +26,17 @@ type Person: Speaker {
 }
 ```
 
+Protocols can define default implementations for thier methods to avoid 
+repetition where an implementation is common to many types.
+
+```
+default Speaker {
+  fun speak() String {
+    return "<No noise detected>"
+  }
+}
+```
+
 Protocols can be used in many of the same places that types are used. Variables
 can be declared using a protocol as the type. If a variable is of a protocol type
 it may be assigned an instance of any type that conforms to the protocol.

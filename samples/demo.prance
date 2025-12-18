@@ -1,4 +1,4 @@
-foo(x: 0, y: 5)
+print(line: "\(foo(x: 0, y: 5))")
 
 fun foo(x: Int , y: Int) Int {
   var ret: Int
@@ -18,15 +18,15 @@ fun bar(x: Double, y: Double) Double {
   return ans
 }
 
-foo(x: 3, y: 5)
-foo(x: 0, y: 0)
-foo(x: 1, y: 0)
-foo(x: 0, y: 1)
+print(line: "\(foo(x: 3, y: 5))")
+print(line: "\(foo(x: 0, y: 0))")
+print(line: "\(foo(x: 1, y: 0))")
+print(line: "\(foo(x: 0, y: 1))")
 
-bar(x: 0.0, y: 0.0)
-bar(x: 1.0, y: 0.0)
-bar(x: 0.0, y: 4.0)
-bar(x: 23.0, y: 27.0)
+print(line: "\(bar(x: 0.0, y: 0.0))")
+print(line: "\(bar(x: 1.0, y: 0.0))")
+print(line: "\(bar(x: 0.0, y: 4.0))")
+print(line: "\(bar(x: 23.0, y: 27.0))")
 
 fun ifFunc() Double {
   var x: Double
@@ -56,7 +56,8 @@ print(line: "Second line")
 
 var line: String
 line = scanLine()
-print(line: line)
+print(line: "You typed: \(line)")
+
 // switch
 
 // structs - done
@@ -68,7 +69,7 @@ type Color {
   var alpha: Int
 
   fun printName() {
-    print(line: "I am a color")
+    print(line: "Red is \(self.red)")
     self.red = self.red - 1
     if (self.red > 0) {
       self.printName()
@@ -107,7 +108,7 @@ fun subStruct() Int {
   return structColor.green
 }
 
-subStruct()
+print(line: "SubStructValue is: \(subStruct())")
 
 // Chain member references
 fun chainStruct() Int {
@@ -120,19 +121,20 @@ fun chainStruct() Int {
   return square.color.alpha
 }
 
-chainStruct()
+print(line: "ChainStructValue is: \(chainStruct())")
 
 // arrays
 
 // dictionaries
 
-// Strings - static done
+// Strings - static done - interpolated Done
+// Dynamic sized strings with count and remove 1000 char limit
 
 // Multi file
 
 // struct methods - done
 
-// protocols
+// protocols - done
 
 protocol Speaker {
   fun speak() String
@@ -176,6 +178,8 @@ fun speaking() {
 speaking()
 
 // protocol extensions
+
+// Call default implementation of protocol method from override
 
 // variable dec+assign on one line
 

@@ -208,6 +208,7 @@ class File {
 
 indirect enum Expr {
   case literal(LiteralType)
+  case formatString([Expr])
   case variable(String)
   case variableDefinition(VariableDefinition)
   case memberDereference(Expr, TypeMemberReference)

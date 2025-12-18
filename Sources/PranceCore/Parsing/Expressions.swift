@@ -50,6 +50,22 @@ extension MemberReferenceToken: PostExpressable {
 
 extension LiteralToken: Expressable {
   func express(tokenStream: TokenStream) throws -> Expr {
+    if case let .string(parts) = type {
+      if parts.count == 1 {
+        return .literal(type)
+      } else {
+        let exprParts = try parts.map {
+          switch $0 {
+          case .string(let string):
+            return Expr.literal(.string([.string(string)]))
+          case .interpolated(let tokens):
+            let innerStream = TokenStream(tokens: tokens)
+            return try innerStream.expressNext()
+          }
+        }
+        return .formatString(exprParts)
+      }
+    }
     return .literal(type)
   }
 }

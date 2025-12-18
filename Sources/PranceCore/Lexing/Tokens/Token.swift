@@ -82,5 +82,5 @@ enum LiteralType {
 
 enum StringPart {
   case string(String)
-  case interpolated([Tokenizable])
+  case interpolated([TokenMarker])
 }

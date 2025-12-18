@@ -4,7 +4,7 @@ protocol StoredType: AnyObject {
   var IRType: IRType? { get set }
   var IRRef: IRType? { get set }
   var name: String { get }
-  
+  var stringFormat: String { get }
   var module: Module? { get set }
   
   func loadedType(types: [String: any CallableType], in module: inout Module) throws -> IRType?
@@ -18,6 +18,10 @@ final class CustomStore: StoredType {
   var IRType: IRType? = nil
   var IRRef: IRType? = nil
   let name: String
+  
+  var stringFormat: String {
+    "%s"
+  }
   
   init(name: String) {
     self.name = name
@@ -47,6 +51,10 @@ final class ReferenceStore: StoredType {
   }
   let name: String = "Pointer"
   var module: Module?
+  
+  var stringFormat: String {
+    pointee.stringFormat
+  }
   
   let pointee: StoredType
   

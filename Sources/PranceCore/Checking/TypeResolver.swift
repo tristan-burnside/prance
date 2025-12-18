@@ -10,6 +10,7 @@ import SwiftyLLVM
 
 indirect enum TypedExpr {
   case literal(LiteralType, StoredType)
+  case formatString([TypedExpr], StoredType)
   case variable(String, StoredType)
   case variableDefinition(VariableDefinition, StoredType)
   case memberDereference(TypedExpr, TypeMemberReference, StoredType)
@@ -25,6 +26,8 @@ indirect enum TypedExpr {
   var type: StoredType {
     switch self {
     case .literal(_, let type):
+      return type
+    case .formatString(_, let type):
       return type
     case .variable(_, let type):
       return type
@@ -130,6 +133,14 @@ final class TypeResolver: ASTChecker {
       return .literal(.double(value), DoubleStore())
     case .literal(.string(let value)):
       return .literal(.string(value), StringStore())
+    case .formatString(let exprs):
+      let typedExprs = try resolveTypes(for: exprs)
+      for expr in typedExprs {
+        guard !(expr.type is VoidStore) else {
+          throw ParseError.wrongType(expectedType: "Any", for: "String interpolation value", got: "Void")
+        }
+      }
+      return .formatString(typedExprs, StringStore())
     case .memberDereference(let instanceExpr, let reference):
       let instanceWithType = try resolveType(of: instanceExpr)
       var instanceType = instanceWithType.type

@@ -16,7 +16,10 @@ class StringLiteralTokenGenerator: TokenGenerator {
   private var isEscaped: Bool = false
   
   private var currentString = ""
+  private var parts : [StringPart] = []
+  
   private var hasOpeningQuote = false
+  private var escapeOpeningCount = 0
   
   func consume(char: Character) {
     guard !isComplete else {
@@ -26,19 +29,26 @@ class StringLiteralTokenGenerator: TokenGenerator {
     if !hasOpeningQuote {
       consumeFirst(char)
     } else if isEscaped {
-      consumeEscaped(char)
+      if escapeOpeningCount == 0 {
+        consumeEscapedOpening(char)
+      } else {
+        consumeEscaped(char)
+      }
     } else {
       consumeBody(char)
     }
   }
   
   func emitToken() throws -> Tokenizable {
-    return LiteralToken(type: .string([.string(currentString)]))
+    parts.append(.string(currentString))
+    return LiteralToken(type: .string(parts))
   }
   
   func reset() {
     hasOpeningQuote = false
+    escapeOpeningCount = 0
     currentString = ""
+    parts.removeAll()
     isComplete = false
     isValid = true
   }
@@ -54,16 +64,41 @@ class StringLiteralTokenGenerator: TokenGenerator {
   private func consumeBody(_ char: Character) {
     if char == "\"" {
       isComplete = true
+    } else if char == "\\" {
+      isEscaped = true
+      parts.append(.string(currentString))
+      currentString = ""
     } else {
       currentString.append(char)
     }
-    if char == "\\" {
-      isEscaped = true
+  }
+  
+  private func consumeEscapedOpening(_ char: Character) {
+    guard char == "(" else {
+      isValid = false
+      return
     }
+    escapeOpeningCount = 1
   }
   
   private func consumeEscaped(_ char: Character) {
+    if char == "(" {
+      escapeOpeningCount += 1
+    }
+    if char == ")" {
+      escapeOpeningCount -= 1
+      if escapeOpeningCount == 0 {
+        let innerLexer = Lexer()
+        do {
+          parts.append(.interpolated(try innerLexer.lex(input: currentString + "\n")))
+        } catch {
+          isValid = false
+        }
+        isEscaped = false
+        currentString = ""
+        return
+      }
+    }
     currentString.append(char)
-    isEscaped = false
   }
 }

@@ -26,6 +26,10 @@ final class DoubleStore: StoredType {
   }
   let name = "Double"
   
+  var stringFormat: String {
+    "%lf"
+  }
+  
   var module: Module?
 }
 
@@ -53,6 +57,10 @@ final class IntStore: StoredType {
     set {
       // Not implemented because this type is already known
     }
+  }
+  
+  var stringFormat: String {
+    "%d"
   }
 
   var module: Module?
@@ -84,6 +92,10 @@ final class FloatStore: StoredType {
     }
   }
   
+  var stringFormat: String {
+    "%f"
+  }
+  
   var module: Module?
 }
 
@@ -113,6 +125,10 @@ final class StringStore: StoredType {
     }
   }
   
+  var stringFormat: String {
+    "%s"
+  }
+  
   var module: Module?
 }
 
@@ -140,6 +156,10 @@ final class VoidStore: StoredType {
     set {
       // Not implemented because this type is already known
     }
+  }
+  
+  var stringFormat: String {
+    fatalError("Voids cannot be part of a format string")
   }
   
   var module: Module?

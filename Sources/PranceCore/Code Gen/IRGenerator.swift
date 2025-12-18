@@ -110,6 +110,9 @@ class IRGenerator {
     guard module.function(named: "printf") == nil else { return }
     let printfType = FunctionType(from: [PointerType(in: &module)], to: IntegerType(32, in: &module), isVarArg: true, in: &module)
     let _ = module.declareFunction("printf", printfType)
+    
+    let sPrintfType = FunctionType(from: [PointerType(in: &module), PointerType(in: &module)], to: IntegerType(32, in: &module), isVarArg: true, in: &module)
+    let _ = module.declareFunction("sprintf", sPrintfType)
   }
   
   func emitScanf() {
@@ -623,6 +626,14 @@ class IRGenerator {
         return (globalString, type)
       }
       throw IRError.unknownType("String with parts")
+    case .formatString(let exprs, let type):
+      let values: [(IRValue, StoredType)] = try exprs.map(emitExprAndLoad)
+      let format = values.map(\.1.stringFormat).joined(separator: "")
+      let formatPointer = module.insertGlobalStringPointer(format, name: "", at: currentInsertion)
+      guard let sPrintf = module.function(named: "sprintf") else { throw IRError.unknownFunction("sprintf") }
+      let outBuffer = module.insertMalloc(module.i8, count: module.i32.constant(1000), at: currentInsertion)
+      _ = module.insertCall(sPrintf, on: [outBuffer, formatPointer] + values.map(\.0), at: currentInsertion)
+      return (outBuffer, type)
     case .binary(let lhs, let op, let rhs, let type):
       let (lhsVal, _) = try emitExprAndLoad(expr: lhs)
       let (rhsVal, _) = try emitExprAndLoad(expr: rhs)

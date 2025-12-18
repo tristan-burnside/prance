@@ -6,7 +6,7 @@ code to be run only when some condition is met.
 
 ## If-else
 
-To run code only in when certain criteria are met, you should use the if syntax.
+To run code only when certain criteria are met, you should use the if syntax.
 
 ```
 var x: Int
@@ -55,3 +55,6 @@ while(i > 0) {
   i = i - 1
 }
 ```
+
+## Do-While
+TODO: Document do-while
