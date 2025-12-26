@@ -15,7 +15,7 @@ final class PropertyReferenceChecker: ASTChecker {
   }
   
   func check() throws {
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .memberDereference(let instance, .property(let name), _):
         let type = try getTypeDefinition(for: instance.type)

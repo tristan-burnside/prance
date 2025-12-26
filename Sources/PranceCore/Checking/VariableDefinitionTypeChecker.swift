@@ -15,7 +15,7 @@ final class VariableDefinitionTypeChecker: ASTChecker {
   }
   
   func check() throws {
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .variableDefinition(_, let type):
         if let customType = type as? CustomStore,

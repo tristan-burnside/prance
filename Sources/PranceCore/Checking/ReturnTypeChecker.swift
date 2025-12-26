@@ -16,7 +16,7 @@ final class ReturnTypeChecker: ASTChecker {
   
   func check() throws {
     // Check that all returns are of the right type
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .return(_, let returnType):
         guard let returnVar = try? parameterValues.findVariable(name: ".return") else {
@@ -40,7 +40,7 @@ final class ReturnTypeChecker: ASTChecker {
     }
     
     for type in file.customTypes {
-      for function in type.functions {
+      for (_, function) in type.functions {
         if try !hasReturn(exprs: function.typedExpr),
            !(function.prototype.returnType is VoidStore) {
           throw ParseError.noReturnInFunction(function.prototype.name)

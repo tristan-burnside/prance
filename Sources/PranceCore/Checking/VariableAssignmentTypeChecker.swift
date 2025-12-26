@@ -15,11 +15,11 @@ final class VariableAssignmentTypeChecker: ASTChecker {
   }
   
   func check() throws {
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .variableAssignment(let variableExpr, let storedExpr, _):
-        let variableType = (variableExpr.type as? ReferenceStore)?.pointee ?? variableExpr.type
-        let storedType = (storedExpr.type as? ReferenceStore)?.pointee ?? storedExpr.type
+        let variableType = variableExpr.type.resolvedType
+        let storedType = storedExpr.type.resolvedType
         let assignableTypeNames = validTypeNames(for: variableType)
         if !assignableTypeNames.contains(storedType.name) {
           throw ParseError.unableToAssign(type: storedType.name, to: storedType.name)

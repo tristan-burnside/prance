@@ -160,6 +160,14 @@ type Human: Speaker {
   }
 }
 
+type Alien: Speaker {
+  fun speak() String {
+    var defaultNoise: String
+    defaultNoise = default(self: self)
+    return "\(defaultNoise) <on the audible spectrum>"
+  }
+}
+
 type Insect: Speaker {}
 
 fun speaking() {
@@ -173,6 +181,8 @@ fun speaking() {
   var insect: Insect
   insect = Insect()
   print(line: insect.speak())
+  speaker = Alien()
+  print(line: speaker.speak())
 }
 
 speaking()

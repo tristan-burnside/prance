@@ -1,7 +1,7 @@
 import SwiftyLLVM
 
 struct Prototype {
-  let name: String
+  var name: String
   let params: [VariableDefinition]
   let returnType: StoredType
 }
@@ -37,15 +37,15 @@ final class TypeDefinition: CallableType {
   var IRType: StructType? = nil
   var IRRef: PointerType? = nil
   let properties: [(String, StoredType)]
-  var functions: [FunctionDefinition]
+  var functions: [String: FunctionDefinition]
   let protocols: [String]
-  var protocolConformanceStubs: [(String, Prototype)] = []
+  var protocolConformanceStubs: [(String, Prototype, Bool)] = []
   
   var prototypes: [Prototype] {
-    return functions.map { $0.prototype } + protocolConformanceStubs.map { $0.1 }
+    return functions.values.map { $0.prototype } + protocolConformanceStubs.filter{ !$0.2 }.map { $0.1 }
   }
   
-  init(name: String, properties: [(String, StoredType)], functions: [FunctionDefinition], protocols: [String]) {
+  init(name: String, properties: [(String, StoredType)], functions: [String: FunctionDefinition], protocols: [String]) {
     self.name = name
     self.properties = properties
     self.functions = functions
@@ -84,18 +84,22 @@ final class ProtocolDefinition: CallableType {
 
 final class ExtensionDefinition {
   let name: String
-  let functions: [FunctionDefinition]
+  let functions: [String: FunctionDefinition]
   
-  init(name: String, functions: [FunctionDefinition]) {
+  init(name: String, functions: [String: FunctionDefinition]) {
     self.name = name
-    self.functions = functions
+    self.functions = functions.mapValues {
+      $0.isDefault = true
+      return $0
+    }
   }
 }
 
 final class FunctionDefinition {
-  let prototype: Prototype
+  var prototype: Prototype
   let expr: [Expr]
   var typedExpr: [TypedExpr]!
+  var isDefault: Bool = false
   
   init(prototype: Prototype, expr: [Expr]) {
     self.prototype = prototype

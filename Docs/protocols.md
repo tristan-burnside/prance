@@ -37,6 +37,20 @@ default Speaker {
 }
 ```
 
+Use the special keyword `default` to extend the default implementation.
+
+```
+type LoomingMonster: Speaker {
+  fun speak() String {
+    var defaultString: String
+    defaultString = default()
+    return "\(defaultString)... yet!"
+  }
+}
+```
+
+This will output the default value with an additional suffix `"<No noise detected>... yet!"`.
+
 Protocols can be used in many of the same places that types are used. Variables
 can be declared using a protocol as the type. If a variable is of a protocol type
 it may be assigned an instance of any type that conforms to the protocol.

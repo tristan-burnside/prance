@@ -38,7 +38,7 @@ final class DuplicateNameChecker: ASTChecker {
       }
     }
     
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .variableDefinition(let definition, _):
         if parameterValues.containsInCurrentFrame(definition.name) {

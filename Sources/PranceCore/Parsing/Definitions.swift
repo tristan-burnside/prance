@@ -34,13 +34,13 @@ extension TypeToken: Definable {
     
     try tokenStream.skip(LeftBraceToken())
     var properties = [(String, StoredType)]()
-    var functions = [FunctionDefinition]()
+    var functions = [String: FunctionDefinition]()
     while let token = tokenStream.next()?.token as? MemberExpressable {
       switch try token.expressMember(tokenStream: tokenStream) {
       case .variable(let variable):
         properties.append((variable.name, variable.type))
       case .function(let function):
-        functions.append(function)
+        functions[function.prototype.name] = function
       }
     }
     return .type(TypeDefinition(name: nameToken.name, properties: properties, functions: functions, protocols: protos))
@@ -184,13 +184,13 @@ extension ExtensionDefinable {
     
     try tokenStream.skip(LeftBraceToken())
     var properties = [(String, StoredType)]()
-    var functions = [FunctionDefinition]()
+    var functions = [String: FunctionDefinition]()
     while let token = tokenStream.next()?.token as? MemberExpressable {
       switch try token.expressMember(tokenStream: tokenStream) {
       case .variable(let variable):
         properties.append((variable.name, variable.type))
       case .function(let function):
-        functions.append(function)
+        functions[function.prototype.name] = function
       }
     }
     
@@ -204,7 +204,15 @@ extension ExtensionToken: ExtensionDefinable, Definable {
   }
 }
 
-extension DefaultToken: ExtensionDefinable, Definable {
+extension DefaultToken: ExtensionDefinable, Definable, Expressable {
+  func express(tokenStream: TokenStream) throws -> Expr {
+    guard tokenStream.peek()?.token is LeftParenToken else {
+      throw ParseError.unexpectedToken(self, tokenStream.peek()!.marker)
+    }
+    let identifier = IdentifierToken(name: "default")
+    return try identifier.express(tokenStream: tokenStream)
+  }
+  
   func create(from tokenStream: TokenStream) throws -> Definition {
     return .defaultImpl(try createExtension(from: tokenStream))
   }

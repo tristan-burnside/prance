@@ -15,7 +15,7 @@ final class OperationChecker: ASTChecker {
   }
   
   func check() throws {
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       switch expr {
       case .binary(let left, let op, let right, _):
         guard left.resolvedType.name == right.resolvedType.name else {

@@ -64,6 +64,7 @@ class IRGenerator {
   let protocolType: StructType
   
   private var parameterValues: StackMemory<IRValue>
+  private var callables: StackMemory<Prototype>
   private var typesByIR: [(IRType, TypeDefinition)]
   private var typesByName: [String: CallableType]
   private var typesByID: [Int32: TypeDefinition]
@@ -78,6 +79,11 @@ class IRGenerator {
     typesByIR = []
     typesByID = [:]
     protocolType = IRGenerator.defineProtocolStruct(module: &module)
+    callables = StackMemory()
+    callables.startFrame()
+    for (name, proto) in file.prototypeMap {
+      callables.addVariable(name: name, value: proto)
+    }
   }
   
   func emit() throws {
@@ -289,11 +295,15 @@ class IRGenerator {
     let internalProperties = [module.i32, module.i32]
     llvmType.setFields(internalProperties + properties)
     try emitInitializer(type.initMethod, for: type)
-    for function in type.functions {
-      try emitMember(function: function, of: type)
-    }
-    for (protocolName, prototype) in type.protocolConformanceStubs {
-      try emitMemberStub(prototype: prototype, of: type, conforms: protocolName)
+    for proto in type.prototypes {
+      let conformance = type.protocolConformanceStubs.first(where: {
+        $0.1.name == proto.name
+      })
+      if conformance?.2 == false {
+        try emitMemberStub(prototype: conformance?.1 ?? proto, of: type, conforms: conformance?.0 ?? "")
+      } else {
+        try emitMember(function: type.functions[proto.name]!, of: type, conforming: conformance?.0)
+      }
     }
   }
   
@@ -316,7 +326,7 @@ class IRGenerator {
   
   @discardableResult
   func emitMember(prototype: Prototype, of type: CallableType) throws -> Function {
-    let llvmPrototype = try internalPrototype(for: prototype, of: type)
+    let llvmPrototype = try internalPrototype(for: prototype, of: type.name)
     return try emitPrototype(llvmPrototype)
   }
   
@@ -325,7 +335,9 @@ class IRGenerator {
     guard let matchingType = typesByName[conforms] else {
       throw IRError.unknownMemberFunction(prototype.name, in: conforms)
     }
-    let prototypeFunction = try emitMember(prototype: prototype, of: matchingType)
+    var defaultPrototype = prototype
+    defaultPrototype.name += ".default"
+    let prototypeFunction = try emitMember(prototype: defaultPrototype, of: matchingType)
     
     let function = try emitMember(prototype: prototype, of: type)
     let entry = module.appendBlock(named: "entry", to: function)
@@ -339,17 +351,26 @@ class IRGenerator {
   
   
   @discardableResult
-  func emitMember(function: FunctionDefinition, of type: CallableType) throws -> Function {
-    let llvmPrototype = try internalPrototype(for: function.prototype, of: type)
+  func emitMember(function: FunctionDefinition, of type: CallableType, conforming: String?) throws -> Function {
+    callables.startFrame()
+    
+    let llvmPrototype = try internalPrototype(for: function.prototype, of: type.name)
     let llvmFunction = FunctionDefinition(prototype: llvmPrototype, expr: function.expr)
     llvmFunction.typedExpr = function.typedExpr
-    return try emitFunction(llvmFunction)
+    if let conforming {
+      var prototype = function.prototype
+      prototype.name += ".default"
+      callables.addVariable(name: "default", value: try internalPrototype(for: prototype, of: conforming))
+    }
+    let function = try emitFunction(llvmFunction)
+    callables.endFrame()
+    return function
   }
   
-  func internalPrototype(for prototype: Prototype, of type: CallableType) throws -> Prototype {
+  func internalPrototype(for prototype: Prototype, of type: String) throws -> Prototype {
     // Add self arg reference
-    let internalName = type.name + "." + prototype.name
-    let selfType = CustomStore(name: type.name)
+    let internalName = type + "." + prototype.name
+    let selfType = CustomStore(name: type)
     let internalParams = [VariableDefinition(name: "self", type: selfType)] + prototype.params
     return Prototype(name: internalName, params: internalParams, returnType: prototype.returnType)
   }
@@ -358,7 +379,7 @@ class IRGenerator {
     let conformingTypes = typesByIR.map { $0.1 }.filter { $0.protocols.contains(proto.name) }
     
     for prototype in proto.prototypes {
-      let internalDefinition = try internalPrototype(for: prototype, of: proto)
+      let internalDefinition = try internalPrototype(for: prototype, of: proto.name)
       let defaultImpl = proto.defaults[prototype.name]
       try emitProtocolMember(name: prototype.name, prototype: internalDefinition, conformingTypes: conformingTypes, defaultImpl: defaultImpl)
     }
@@ -390,7 +411,7 @@ class IRGenerator {
     var cases = [(IRValue, BasicBlock)]()
     
     for type in conformingTypes {
-      if let typedFunction = type.functions.first(where: { $0.prototype.name == name }) {
+      if let typedFunction = type.functions[name] {
         let typeBlock = module.appendBlock(named: type.name, to: function)
         currentInsertion = module.endOf(typeBlock)
         // bitcast to type
@@ -414,18 +435,22 @@ class IRGenerator {
     currentInsertion = module.endOf(entryBlock)
     module.insertSwitch(on: typeID, cases: cases, default: defaultBlock, at: currentInsertion)
 
+    if let defaultImpl {
+      defaultImpl.prototype = prototype
+      try emitFunction(defaultImpl)
+    }
+    
+    let argTypes = try prototype.params.map{ $0.type }.map{ try $0.findRef(types: typesByName, in: module) }
+    let defaultType = FunctionType(from: argTypes, to: prototype.returnType.IRType, isVarArg: false, in: &module)
+    let defaultFunction = module.declareFunction(function.name + ".default", defaultType)
     
     currentInsertion = module.endOf(defaultBlock)
-    if let defaultImpl = defaultImpl {
-      try defaultImpl.typedExpr.forEach { let _ = try emitExpr($0) }
-      if defaultImpl.prototype.returnType is VoidStore,
-        !(defaultImpl.expr.last is Returnable) {
-        let _ = try emitExpr(.return(nil, VoidStore()))
-      }
-    } else {
-      let _ = try emitExpr(.return(nil, VoidStore()))
+    let defaultReturn = module.insertCall(defaultFunction, on: Array(function.parameters), at: currentInsertion)
+    if prototype.returnType.name != VoidStore().name {
+      module.insertStore(defaultReturn, to: try parameterValues.findVariable(name: ".return"), at: currentInsertion)
     }
-
+    module.insertBr(to: returnBlock, at: currentInsertion)
+    
     currentInsertion = module.endOf(returnBlock)
     if prototype.returnType.name == VoidStore().name {
       module.insertReturn(at: currentInsertion)
@@ -457,7 +482,11 @@ class IRGenerator {
   
   @discardableResult
   func emitFunction(_ definition: FunctionDefinition) throws -> Function {
-    let function = try emitPrototype(definition.prototype)
+    var prototype = definition.prototype
+    if definition.isDefault {
+      prototype.name += ".default"
+    }
+    let function = try emitPrototype(prototype)
     currentFunction = function
     parameterValues.startFrame()
     
@@ -711,7 +740,7 @@ class IRGenerator {
       throw IRError.unableToCompare(lhsVal.type, rhsVal.type)
       
     case .call(let functionCall, let type):
-      guard let prototype = file.prototype(name: functionCall.name) else {
+      guard let prototype = try? callables.findVariable(name: functionCall.name) else {
         throw IRError.unknownFunction(functionCall.name)
       }
       guard prototype.params.count == functionCall.args.count else {

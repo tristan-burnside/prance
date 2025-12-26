@@ -30,7 +30,7 @@ final class ProtocolConformanceChecker: ASTChecker {
       return proto.prototypes.filter { proto.defaults[$0.name] == nil }.map { (type, proto.name, $0) }
     }.filter { (type, protocolName, protocolFunction) -> Bool in
       return !type.functions.contains(where: { (function) -> Bool in
-        function.prototype == protocolFunction
+        function.value.prototype == protocolFunction
       })
     }
     .forEach({ (type, protocolName, protocolFunction) in
@@ -38,7 +38,7 @@ final class ProtocolConformanceChecker: ASTChecker {
     })
   
     // Add conformance stubs where relying on default implementatons
-    try file.customTypes.map {
+    let typeProtocolConformances = try file.customTypes.map {
       return ($0, $0.protocols)
     }.flatMap { (type, protos) -> [(TypeDefinition, String)] in
       return protos.map { (type, $0) }
@@ -47,15 +47,17 @@ final class ProtocolConformanceChecker: ASTChecker {
         throw ParseError.unknownProtocol(proto, in: type.name)
       }
       return (type, protoDef)
-    }.flatMap { (type, proto) in
-      return proto.prototypes.map { (type, proto.name, $0) }
-    }.filter { (type, protocolName, protocolFunction) -> Bool in
-      return !type.functions.contains(where: { (function) -> Bool in
-        function.prototype == protocolFunction
-      })
     }
-    .forEach({ (type, protocolName, protocolFunction) in
-      type.protocolConformanceStubs.append((protocolName, protocolFunction))
+    
+    typeProtocolConformances.flatMap { (type, proto) in
+      return proto.prototypes.map { (type, proto.name, $0) }
+    }.map { (type: TypeDefinition, protocolName: String, protocolFunction) in
+      return (type, protocolName, protocolFunction, type.functions.contains(where: { (function) -> Bool in
+        function.value.prototype == protocolFunction
+      }))
+    }
+    .forEach({ (type, protocolName, protocolFunction, isOverridden) in
+      type.protocolConformanceStubs.append((protocolName, protocolFunction, isOverridden))
     })
   }
 }

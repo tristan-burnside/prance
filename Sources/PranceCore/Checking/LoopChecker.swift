@@ -15,7 +15,7 @@ final class LoopChecker: ASTChecker {
   }
   
   func check() throws {
-    try checkExpr { (expr, parameterValues) in
+    try checkExpr { (expr, parameterValues, _) in
       var condition: TypedExpr? = nil
       var loopBody: [TypedExpr]? = nil
       switch expr {

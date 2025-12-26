@@ -17,7 +17,7 @@ final class ExtensionResolver: ASTChecker {
   func check() throws {
     for extend in file.extensions {
       if let type = file.customTypes.first(where: { $0.name == extend.name }) {
-        type.functions.append(contentsOf: extend.functions)
+        type.functions.merge(extend.functions, uniquingKeysWith: { $1 })
       } else {
         throw ParseError.couldNotFindTypeForExtension(extend.name)
       }
@@ -25,7 +25,7 @@ final class ExtensionResolver: ASTChecker {
     
     for def in file.defaults {
       if let proto = file.protocols.first(where: { $0.name == def.name }) {
-        for function in def.functions {
+        for (_, function) in def.functions {
           guard let prototype = proto.prototypes.first(where: { $0.name == function.prototype.name }) else {
             throw ParseError.unknownFunction(function.prototype.name)
           }
@@ -40,3 +40,4 @@ final class ExtensionResolver: ASTChecker {
     }
   }
 }
+
